@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🐳Anibuy</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+   <nav class="navbar">
+       <div class="navbar-container">
+           <div class="logo">
+               🐳 AⓃiii StORE
+           </div>
+
+           <ul class="nav-links">
+               <li class="active"><a href="web2.html">Home</a></li>
+               <li><a href="product.html">Products</a></li>
+               <li><a href="#">About</a></li>
+           </ul>
+
+           <div class="nav-right">
+               <div class="search-box">
+                   <input type="text" placeholder="Search anime products...">
+                   <button>🔍</button>
+               </div>
+
+               <div class="cart-icon">
+                   🛒 <span id="cart-count">0</span>
+               </div>
+
+               <button class="login-btn">Login</button>
+           </div>
+       </div>
+   </nav>
+
+<!-- <section class="hero">
+
+    <div class="hero-content">
+
+        <h4>Welcome to Aniii StORE</h4>
+
+        <h1>
+            ANIME <br>
+            MERCH <br>
+            COLLECTION
+        </h1>
+
+        <p>
+            Discover exclusive anime figures, posters,
+            keychains, phone cases, airpods and more.
+        </p>
+
+        <button class="shop-btn">
+            Shop Now
+        </button>
+
+    </div>
+
+    <div class="hero-image">
+
+        <img src="https://wallpapercave.com/wp/wp5128415.jpg" -->
+             <!-- alt="Anime Collection"> -->
+        <!-- <img src="https://4kwallpapers.com/images/walls/thumbs_2t/23027.jpg" alt="">
+        <img src="https://wallpapercave.com/wp/wp8553732.jpg" alt="">
+
+    </div>  -->
+
+    <section class="hero">
+
+    <div class="overlay"></div>
+
+    <div class="hero-content">
+
+        <span class="badge">
+            NEW COLLECTION
+        </span>
+
+        <h1>
+            Premium Anime
+            <span>Merchandise.</span>
+        </h1>
+
+        <p>
+            Discover premium anime figures,
+            posters, keychains, apparel and
+            accessories for every fan.
+        </p>
+
+        <button class="shop-btn">
+            Shop Now
+        </button>
+
+        <img src="https://4kwallpapers.com/images/walls/thumbs_2t/23027.jpg" class="anime-card card1">
+
+        <img src="https://wallpapercave.com/wp/wp8553732.jpg" class="anime-card card2">
+
+        <img src="https://m.media-amazon.com/images/I/81Xt070VKIL._AC_UF894,1000_QL80_.jpg" class="anime-card card3">
+
+    </div>
+
+</section>
+     <!-- <img src="https://4kwallpapers.com/images/walls/thumbs_2t/23027.jpg" alt="">
+        <img src="https://wallpapercave.com/wp/wp8553732.jpg" alt="">
+ -->
+<!-- 
+</section>
+
+    <h1>🐳AⓃiii StORE</h1>
+
+    <div class="products">
+
+        <div class="product">
+            <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR4ZV1xapPFKFIffE3lv1wTXDAtrjGImBnmDQ&s" alt="">
+            <h2>Zoro Statue</h2>
+            <h3>₹499</h3>
+
+            <button onclick="addToCart('Zoro Statue',499)">
+                Add to Cart
+            </button>
+        </div>
+
+        <div class="product">
+            <img src="https://singhchand.com/cdn/shop/files/keyring7_8dd1b79d-6af5-435e-951b-fdbcf4139e75_1800x1800.jpg?v=1712832899" alt="">
+            <h2>Luffy Keychain</h2>
+            <h3>₹49</h3>
+            <h4>luffy keychain(metal),non rusting metal</h4>
+
+            <button onclick="addToCart('Luffy Keychain',49)">
+                Add to Cart
+            </button>
+        </div>
+
+        <div class="product">
+            <img src="https://animemart.in/cdn/shop/products/GokuOrangeThemedPhoneCover.jpg?v=1653018539&width=2383" alt="">
+            <h2>Goku Phone Case</h2>
+            <h3>₹199</h3>
+
+            <button onclick="addToCart('Goku Phone Case',199)">
+                Add to Cart
+            </button>
+        </div>
+        <div class="product">
+            <img src="https://m.media-amazon.com/images/I/71+V36QKxYL._AC_UF350,350_QL50_.jpg" alt="">
+            <h2>Mikasa Poster</h2>
+            <h3>₹299</h3>
+
+            <button onclick="addToCart('Mikasa Poster',299)">
+                Add to Cart
+            </button>
+        </div>
+        <div class="product">
+           <img src="https://m.media-amazon.com/images/I/61u8R-9t3CL._AC_UF1000,1000_QL80_.jpg" alt="">
+           <h2>Naruto Statue</h2>
+           <h3>₹399</h3>
+
+           <button onclick="addToCart('Naruto Statue',399)">
+            Add to Cart
+           </button>
+        </div>
+        <div class="product">
+            <img src="https://www.turtlewings.co.in/cdn/shop/files/download_caaa5e1a-8e1c-4856-9191-89ededcf544c.jpg?crop=center&height=800&v=1748156263&width=800" alt="">
+            <h2>Naruto deskmat</h2>
+            <h3>₹799</h3>
+
+            <button onclick="addToCart('Naruto deskmat',799)">
+                Add to Cart
+            </button>
+        </div>
+
+        <div class="product">
+            <img src="https://5.imimg.com/data5/ANDROID/Default/2024/1/377386173/HA/NV/LW/143259840/product-jpeg.jpg" alt="">
+            <h2>Kakashi T-shirt</h2>
+            <h3>₹299</h3>
+
+            <button onclick="addToCart('Kakashi T-shirt',299)">
+                Add to Cart
+            </button>
+            
+        </div>
+
+        <div class="product">
+            <img src="https://images.meesho.com/images/products/678851148/vuhog_512.webp?width=512" alt="">
+            <h2>Demon Slayer keychain(4 pces)</h2>
+            <h3>₹299</h3>
+
+            <button onclick="addToCart('Demon Slayer keychain',299)">
+                Add to Cart
+            </button>
+        </div>
+
+        <div class="product">
+            <img src="https://bearhugs.in/cdn/shop/files/buy-dragon-ball-z-super-saiyan-blue-gogeta-figurine-31-cm-at-bear-hugs-43052.webp?v=1771036429" alt="">
+            <h2>Gogeta Statue</h2>
+            <h3>₹499</h3>
+
+            <button onclick="addToCart('Gogeta Statue',499)">
+                Add to Cart
+            </buttton>
+        </div>
+
+        <div class="product">
+            <img src="https://m.media-amazon.com/images/I/61wa0AwJQ+L.jpg" alt="">
+            <h2>JJK (6 pces)</h2>
+            <h3>₹1499</h3>
+
+            <button onclick="addToCart('JJK toys(6 pces)',1499)">
+                Add to Cartt
+            </button>
+        </div>
+
+        <div class="product">
+            <img src="https://www.nekoo.in/cdn/shop/files/9373706e-bb4a-4c79-8562-9c598d151003.jpg?v=1742995638" alt="">
+            <h2> Demon Slayer(6 pces)</h2>
+            <h3>999</h3>
+
+            <button onclick="addToCart('Demon Slayer(6 pces)',999)">
+                Add to Cart
+            </button>
+        </div>
+
+        <div class="product">
+            <img src="https://theskins.in/cdn/shop/files/laptopgt6_c3cab2e8-4f25-4b0b-9ed5-00f7349eedd9.jpg?v=1752758871" alt="">
+            <h2>One Piece Laptop Skin</h2>
+            <h3>₹1499</h3>
+
+            <button onclick="addToCart('One Piece Laptop Skin',1499)">
+                Add to Cart
+            </button>
+        </div>
+
+        <div class="product">
+            <img src="https://p16-oec-general-useast5.ttcdn-us.com/tos-useast5-i-omjb5zjo8w-tx/b757c8729c6342d192db954852d5d3ac~tplv-fhlh96nyum-crop-webp:1200:1200.webp?dr=12190&t=555f072d&ps=933b5bde&shp=8dbd94bf&shcp=e1be8f53&idc=useast5&from=2378011839" alt="">
+            <h2> Gojo Miniature Figure</h2>
+            <h3> ₹599</h3>
+        
+
+        <button onclick ="addToCart('Gojo Miniature Figure',599)">
+            Add to Cart
+        </button>
+        </div>
+
+        <div class="product">
+            <img src="https://assets.myntassets.com/w_412,q_50,,dpr_3,fl_progressive,f_webp/assets/images/2026/MAY/27/t4RFzpQV_0ed9b8b31ab649a891a60364bcbd7dd2.jpg" alt="">
+            <h2>Tanjiro Poster</h2>
+            <h3>499</h3>
+        
+
+        <button onclick="addToCart('Tanjiro poster',499)">
+            Add to Cart
+        </button>
+        </div>
+
+        <div class="product">
+            <img src="https://m.media-amazon.com/images/I/71RUujd4J-L._AC_UF894,1000_QL80_.jpg" alt="">
+            <h2>Kakashi Airpod</h2>
+            <h3>₹1499</h3>
+        
+
+            <button onclick="addToCart('Kakshi Airpods',1499)">
+                Add to Cart
+            </button>
+        </div >
+
+         </div> -->
+
+    <section class="categories">
+
+    <div class="category-header">
+        <h2>Categories</h2>
+        <p>Explore our premium selection by type.</p>
+    </div>
+
+    <div class="category-grid">
+
+        <div class="category-card">
+            <div class="category-icon">🎎</div>
+            <h3>Figures</h3>
+        </div>
+
+        <div class="category-card">
+            <div class="category-icon">🖼️</div>
+            <h3>Posters</h3>
+        </div>
+
+        <div class="category-card">
+            <div class="category-icon">🔑</div>
+            <h3>Keychains</h3>
+        </div>
+
+        <div class="category-card">
+            <div class="category-icon">👕</div>
+            <h3>Clothing</h3>
+        </div>
+
+        <div class="category-card">
+            <div class="category-icon">📱</div>
+            <h3>Phone Cases</h3>
+        </div>
+
+        <div class="category-card">
+            <div class="category-icon">⌚</div>
+            <h3>Accessories</h3>
+        </div>
+
+    </div>
+
+</section>
+
+    <section class="features">
+        <div class="feature-box reveal">
+            <div class="icon">🔒</div>
+            <h3>Secure Payments</h3>
+            <p>256-bit encryption</p>
+        </div>
+
+        <div class="feature-box reveal">
+            <div class="icon">🚚</div>
+            <h3>Fast Shipping</h3>
+            <p>Global delivery</p>
+        </div>
+
+        <div class="feature-box reveal">
+            <div class="icon">↩️</div>
+            <h3>Easy Returns</h3>
+            <p>30-day policy</p>
+        </div>
+
+        <div class="feature-box reveal">
+            <div class="icon">⭐</div>
+            <h3>Premium Quality</h3>
+            <p>Authentic anime goods</p>
+        </div>
+
+        <div class="feature-box reveal">
+            <div class="icon">🎧</div>
+            <h3>Customer Support</h3>
+            <p>24/7 help</p>
+        </div>
+    </section>
+
+        <footer class="footer">
+
+    <div class="footer-container reveal">
+
+        <div class="footer-section">
+            <h2><span class="red">ANiii</span> StORE</h2>
+            <p>
+                The premier destination for authentic,
+                high-end anime merchandise.
+            </p>
+        </div>
+
+        <div class="footer-section">
+            <h3>Shop</h3>
+            <a href="#">Figures</a>
+            <a href="#">Apparel</a>
+            <a href="#">Accessories</a>
+        </div>
+
+        <div class="footer-section">
+            <h3>Support</h3>
+            <a href="#">FAQ</a>
+            <a href="#">Shipping Info</a>
+            <a href="#">Returns</a>
+        </div>
+
+        <div class="footer-section">
+            <h3>Legal</h3>
+            <a href="#">Privacy Policy</a>
+            <a href="#">Terms of Service</a>
+            <a href="#">About Us</a>
+        </div>
+
+    </div>
+
+
+
+    <div class="footer-bottom">
+        © 2026 ANiii STORE. All rights reserved.
+    </div>
+
+</footer>
+    <script src="cart.js"></script>
+
+</body>
+</html>
