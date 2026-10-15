@@ -1,0 +1,23 @@
+{
+  "name": "aniii-store",
+  "version": "1.1.0",
+  "description": "ANiii STORE - High-end, responsive anime merchandise e-commerce platform with client-side state management, responsive drawer, and test suite.",
+  "main": "cart.js",
+  "scripts": {
+    "test": "node --test tests/**/*.test.js",
+    "test:watch": "node --test --watch tests/**/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage tests/**/*.test.js",
+    "serve": "python3 -m http.server 3000"
+  },
+  "keywords": [
+    "ecommerce",
+    "anime",
+    "vanilla-javascript",
+    "css3",
+    "html5",
+    "localstorage",
+    "unit-testing"
+  ],
+  "author": "ANiii Store Engineering Team",
+  "license": "MIT"
+}
