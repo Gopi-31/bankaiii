@@ -1022,8 +1022,42 @@ body {
 /* ACCESSIBILITY & FOCUS ENHANCEMENTS */
 button:focus-visible,
 input:focus-visible,
-a:focus-visible {
+a:focus-visible,
+.cart-icon:focus-visible {
     outline: 2px solid var(--primary-color);
     outline-offset: 3px;
+    border-radius: 8px;
 }
+
+/* CART ERROR BOUNDARY RECOVERY STATE */
+.cart-error-msg {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 15px;
+    margin-top: 30px;
+    padding: 24px 20px;
+    background: rgba(255, 77, 109, 0.1);
+    border: 1px solid rgba(255, 77, 109, 0.25);
+    border-radius: 14px;
+}
+
+.cart-retry-btn {
+    margin-top: 14px;
+    padding: 8px 18px;
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    transition: var(--transition-smooth);
+}
+
+.cart-retry-btn:hover {
+    filter: brightness(1.15);
+    transform: translateY(-1px);
+}
+
 

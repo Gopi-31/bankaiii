@@ -1,6 +1,6 @@
 {
   "name": "aniii-store",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "ANiii STORE - High-end, responsive anime merchandise e-commerce platform with client-side state management, responsive drawer, and test suite.",
   "main": "cart.js",
   "scripts": {

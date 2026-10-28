@@ -1,19 +1,40 @@
 /**
- * ANiii STORE - Core Client State Controller, UI Presenter & Error Boundary
+ * ANiii STORE — Core Client State Controller, UI Presenter & Multi-Tier Error Resilience
  *
  * ARCHITECTURAL DESIGN RATIONALE:
- * 1. Clean Separation of Concerns:
- *    - SafeStorage: Hardware & privacy-mode resilient storage abstraction (handles Safari private mode, QuotaExceededError, corrupted JSON).
- *    - CartService: Pure domain logic (validations, price calculations, quantity capping, state mutations).
- *    - CartUI: Presentation layer managing drawer DOM, animations, event delegation, and keyboard accessibility.
- *    - ToastManager: Accessible, multi-variant notification system preventing XSS attacks via textContent.
- *    - SearchAndFilterController: Live catalog filtering, URL query parameter synchronization, and empty state rendering.
- *    - GlobalErrorBoundary: Centralized unhandled error logging and user notification.
+ * 1. Clean Separation of Concerns (Model-View-Presenter with Observable Event Bus):
+ *    - SafeStorage: Hardware & privacy-mode resilient storage abstraction.
+ *      Transparently handles Safari private browsing restrictions, QuotaExceededError,
+ *      and corrupted JSON records via an automatic in-memory Map fallback.
+ *    - CartService: Pure domain logic decoupled from DOM operations.
+ *      Enforces business rules (schema validation, price precision, quantity capping,
+ *      mutation, persistence, and state change subscriptions).
+ *    - CartUI: Presentation layer managing the slide-out drawer DOM, accessibility attributes,
+ *      event delegation, animations, and user-facing notifications.
+ *    - ToastManager: Accessible, multi-variant notification system protecting against
+ *      Cross-Site Scripting (XSS) via safe DOM textContent insertion.
+ *    - SearchAndFilterController: Live catalog filtering on product.html and search submission
+ *      from web2.html with URL query parameter synchronization.
+ *    - Multi-Tier Error Boundaries:
+ *      * Level 1: Local try/catch handling for operational, predictable errors (JSON parsing, inputs).
+ *      * Level 2: Component-level failure isolation (safeInitComponent) preventing an error in one
+ *                 optional feature from aborting other UI components.
+ *      * Level 3: Global error & unhandled promise rejection listeners for unhandled runtime telemetry.
+ *      * Level 4: Storage degradation and automatic in-memory fallback.
+ *
  * 2. Cross-Environment Compatibility:
- *    - Dual-target architecture: Executes seamlessly in both browser (window/DOM) and Node.js (for headless unit testing).
+ *    - Dual-target architecture: Executes seamlessly in browser environments (window/DOM)
+ *      and in Node.js headless environments for automated unit and integration testing.
+ *
  * 3. Security Hardening:
- *    - Strict input validation on all item fields.
- *    - HTML entity escaping preventing Cross-Site Scripting (XSS) via injected product names or descriptions.
+ *    - Strict schema validation on all product properties.
+ *    - HTML entity escaping (escapeHtml) preventing stored and DOM-based Cross-Site Scripting (XSS).
+ *    - Safe URL verification (sanitizeImageUrl) rejecting dangerous URI pseudoprotocols (e.g. javascript:).
+ *
+ * 4. Accessibility (WCAG 2.1 AA Compliant):
+ *    - ARIA attributes (role="dialog", aria-modal="true", aria-live="polite", aria-label).
+ *    - Full keyboard navigation: Escape key drawer closure, Enter/Space activation on cart triggers.
+ *    - Focus management: Tracks active trigger element before opening and restores focus upon closing.
  */
 
 'use strict';
@@ -22,7 +43,20 @@
    1. CONSTANTS & CONFIGURATION
    ========================================================================== */
 
-const CONFIG = {
+/**
+ * Immutable global configuration tokens governing domain rules, storage keys,
+ * and default visual assets.
+ * @readonly
+ * @type {Readonly<{
+ *   STORAGE_KEY: string,
+ *   MAX_ITEM_QTY: number,
+ *   MIN_ITEM_QTY: number,
+ *   MAX_NAME_LENGTH: number,
+ *   CURRENCY_SYMBOL: string,
+ *   DEFAULT_FALLBACK_IMAGE: string
+ * }>}
+ */
+const CONFIG = Object.freeze({
     STORAGE_KEY: 'cart',
     MAX_ITEM_QTY: 99,
     MIN_ITEM_QTY: 1,
@@ -37,32 +71,74 @@ const CONFIG = {
             <text x="50%" y="87%" font-family="system-ui, sans-serif" font-size="12" fill="#a0aec0" text-anchor="middle">Premium Merchandise</text>
         </svg>
     `)
-};
+});
 
 /* ==========================================================================
-   2. CUSTOM ERROR TYPES
+   2. CUSTOM ERROR TYPES (DOMAIN & INFRASTRUCTURE EXCEPTIONS)
    ========================================================================== */
 
 /**
- * Custom error class for cart item validation failures.
- * Used to distinguish validation issues from unexpected runtime faults.
+ * Custom error thrown when product inputs fail domain validation rules.
+ * Enables calling code to differentiate validation rejections from runtime faults.
+ *
+ * @class CartValidationError
+ * @extends {Error}
  */
 class CartValidationError extends Error {
+    /**
+     * @param {string} message - Human-readable validation failure description.
+     * @param {string|null} [field=null] - The specific field that failed validation (e.g. 'name', 'price', 'quantity').
+     */
     constructor(message, field = null) {
         super(message);
         this.name = 'CartValidationError';
         this.field = field;
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, CartValidationError);
+        }
     }
 }
 
 /**
- * Custom error class for persistent storage operations.
+ * Custom error thrown or logged when storage adapters encounter hardware or permission failures.
+ *
+ * @class StorageError
+ * @extends {Error}
  */
 class StorageError extends Error {
+    /**
+     * @param {string} message - Description of the storage failure.
+     * @param {Error|null} [cause=null] - Underlying system error (e.g. QuotaExceededError).
+     */
     constructor(message, cause = null) {
         super(message);
         this.name = 'StorageError';
         this.cause = cause;
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, StorageError);
+        }
+    }
+}
+
+/**
+ * Custom error class representing an isolated component initialization failure.
+ *
+ * @class ComponentInitError
+ * @extends {Error}
+ */
+class ComponentInitError extends Error {
+    /**
+     * @param {string} componentName - The identifier of the failing component.
+     * @param {Error} originalError - The caught exception.
+     */
+    constructor(componentName, originalError) {
+        super(`Component "${componentName}" failed initialization: ${originalError?.message || String(originalError)}`);
+        this.name = 'ComponentInitError';
+        this.componentName = componentName;
+        this.originalError = originalError;
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, ComponentInitError);
+        }
     }
 }
 
@@ -71,9 +147,15 @@ class StorageError extends Error {
    ========================================================================== */
 
 /**
- * Escapes untrusted strings before insertion into DOM HTML to prevent XSS.
- * @param {unknown} input - String or value to sanitize.
- * @returns {string} Sanitized string safe for HTML rendering.
+ * Escapes untrusted strings before insertion into DOM HTML strings to prevent XSS.
+ * Converts the 5 critical HTML special characters into their standard XML/HTML entity equivalents.
+ *
+ * @param {unknown} input - Untrusted string or value to sanitize.
+ * @returns {string} Sanitized string safe for HTML interpolation.
+ *
+ * @example
+ * escapeHtml('<script>alert("xss")</script>');
+ * // returns: '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
  */
 function escapeHtml(input) {
     if (input === null || input === undefined) return '';
@@ -86,13 +168,46 @@ function escapeHtml(input) {
 }
 
 /**
- * Robust monetary price formatter avoiding IEEE-754 floating-point display glitches.
- * @param {number} amount - Numeric amount to format.
- * @returns {string} Formatted number with commas (e.g. 1,499).
+ * Validates and normalizes product image URLs.
+ * Rejects dangerous URI schemes (e.g. javascript:, vbscript:, data:text/html)
+ * and returns the default theme SVG placeholder if invalid.
+ *
+ * @param {unknown} url - The candidate image URL to verify.
+ * @returns {string} A safe image URL string or the default SVG fallback.
+ */
+function sanitizeImageUrl(url) {
+    if (typeof url !== 'string') return CONFIG.DEFAULT_FALLBACK_IMAGE;
+    const trimmed = url.trim();
+    if (trimmed.length === 0) return CONFIG.DEFAULT_FALLBACK_IMAGE;
+
+    // Disallow dangerous script execution protocols
+    const lower = trimmed.toLowerCase();
+    if (lower.startsWith('javascript:') || lower.startsWith('vbscript:') || lower.startsWith('data:text/html')) {
+        console.warn('[Security] Blocked potentially unsafe image URL protocol:', trimmed);
+        return CONFIG.DEFAULT_FALLBACK_IMAGE;
+    }
+
+    return trimmed;
+}
+
+/**
+ * Formats monetary amounts for user-facing display using Indian Numbering Grouping (₹).
+ * Utilizes epsilon arithmetic (`Math.round((numeric + Number.EPSILON) * 100) / 100`)
+ * to eliminate IEEE-754 binary floating-point representation artifacts (e.g. 0.1 + 0.2 = 0.30000000000000004).
+ *
+ * @param {number|string|unknown} amount - Numeric or numeric string price value.
+ * @returns {string} Formatted number string with commas (e.g., "1,499" or "49.5").
+ *
+ * @example
+ * formatCurrency(1499); // "1,499"
+ * formatCurrency(0.1 + 0.2); // "0.3"
  */
 function formatCurrency(amount) {
-    const numeric = Number(amount) || 0;
-    // Round to 2 decimal places safely using epsilon arithmetic
+    const numeric = Number(amount);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+        return '0';
+    }
+    // Round to 2 decimal places safely avoiding floating point rounding errors
     const rounded = Math.round((numeric + Number.EPSILON) * 100) / 100;
     return rounded.toLocaleString('en-IN');
 }
@@ -103,13 +218,21 @@ function formatCurrency(amount) {
 
 /**
  * Fault-tolerant storage wrapper that provides:
- * 1. Automatic fallback to an in-memory Map if localStorage is blocked (e.g., Safari private browsing, sandboxed iframes).
+ * 1. Automatic fallback to an in-memory Map if localStorage is blocked
+ *    (e.g., Safari private browsing, sandboxed iframes, strict cookie blocking).
  * 2. Graceful degradation when quota is exceeded (QuotaExceededError).
- * 3. Safe JSON parsing with automatic recovery on corrupted data.
+ * 3. Safe read/write boundaries preventing storage exceptions from crashing UI code.
+ *
+ * @class SafeStorage
  */
 class SafeStorage {
+    /**
+     * @param {Storage|Object|null} [customBackend=null] - Optional backend for dependency injection during unit testing.
+     */
     constructor(customBackend = null) {
+        /** @private @type {Map<string, string>} */
         this.memoryStore = new Map();
+        /** @type {boolean} */
         this.isMemoryMode = false;
 
         if (customBackend) {
@@ -122,7 +245,7 @@ class SafeStorage {
                 window.localStorage.removeItem(testKey);
                 this.backend = window.localStorage;
             } catch (err) {
-                console.warn('[SafeStorage] localStorage is restricted or unavailable. Switching to memory fallback.', err.message);
+                console.warn('[SafeStorage] localStorage is restricted or unavailable. Switching to in-memory fallback mode.', err?.message);
                 this.isMemoryMode = true;
                 this.backend = null;
             }
@@ -132,6 +255,11 @@ class SafeStorage {
         }
     }
 
+    /**
+     * Retrieve a string value by key.
+     * @param {string} key - Storage key name.
+     * @returns {string|null} Value or null if not found.
+     */
     getItem(key) {
         if (this.isMemoryMode || !this.backend) {
             return this.memoryStore.get(key) || null;
@@ -139,11 +267,17 @@ class SafeStorage {
         try {
             return this.backend.getItem(key);
         } catch (err) {
-            console.warn(`[SafeStorage] Failed to read key "${key}". Falling back to memory:`, err.message);
+            console.warn(`[SafeStorage] Failed to read key "${key}". Falling back to memory:`, err?.message);
             return this.memoryStore.get(key) || null;
         }
     }
 
+    /**
+     * Store a string value by key. Switches to memory mode if quota is exceeded.
+     * @param {string} key - Storage key name.
+     * @param {unknown} value - Value to serialize to string.
+     * @returns {boolean} True if successfully stored in backend, false if degraded to memory.
+     */
     setItem(key, value) {
         const stringValue = String(value);
         if (this.isMemoryMode || !this.backend) {
@@ -154,34 +288,51 @@ class SafeStorage {
             this.backend.setItem(key, stringValue);
             return true;
         } catch (err) {
-            // QuotaExceededError or SecurityError
-            console.warn(`[SafeStorage] Quota exceeded or storage denied for "${key}". Using in-memory fallback:`, err.message);
+            // Catches QuotaExceededError, SecurityError, or generic storage failures
+            console.warn(`[SafeStorage] Quota exceeded or storage denied for "${key}". Using in-memory fallback:`, err?.message);
             this.isMemoryMode = true;
             this.memoryStore.set(key, stringValue);
             return false;
         }
     }
 
+    /**
+     * Remove a key from both backend and memory stores.
+     * @param {string} key - Storage key to remove.
+     */
     removeItem(key) {
         if (!this.isMemoryMode && this.backend) {
             try {
                 this.backend.removeItem(key);
             } catch (err) {
-                console.warn(`[SafeStorage] Failed to remove "${key}":`, err.message);
+                console.warn(`[SafeStorage] Failed to remove "${key}" from backend. Switching to memory fallback:`, err?.message);
+                this.isMemoryMode = true;
             }
         }
         this.memoryStore.delete(key);
     }
 
+    /**
+     * Clear all keys from both backend and memory stores.
+     */
     clear() {
         if (!this.isMemoryMode && this.backend) {
             try {
                 this.backend.clear();
             } catch (err) {
-                console.warn('[SafeStorage] Failed to clear backend storage:', err.message);
+                console.warn('[SafeStorage] Failed to clear backend storage. Switching to memory fallback:', err?.message);
+                this.isMemoryMode = true;
             }
         }
         this.memoryStore.clear();
+    }
+
+    /**
+     * Check whether the adapter is actively running in memory-fallback mode.
+     * @returns {boolean} True if memory fallback is active.
+     */
+    isInMemoryMode() {
+        return this.isMemoryMode;
     }
 }
 
@@ -190,20 +341,32 @@ class SafeStorage {
    ========================================================================== */
 
 /**
- * Pure cart domain model and state controller.
- * Decoupled from direct DOM manipulation to facilitate comprehensive unit testing.
+ * Pure shopping cart domain service and state controller.
+ * Completely decoupled from direct DOM manipulation to facilitate comprehensive unit testing.
+ *
+ * Implements an Observable pattern via `subscribe()`, automatically notifying registered
+ * presenters whenever cart items mutate.
+ *
+ * @class CartService
  */
 class CartService {
+    /**
+     * @param {SafeStorage|Object} [storageAdapter=new SafeStorage()] - Storage provider.
+     */
     constructor(storageAdapter = new SafeStorage()) {
+        /** @type {SafeStorage|Object} */
         this.storage = storageAdapter;
+        /** @type {Array<{name: string, price: number, image: string, quantity: number}>} */
         this.items = this._loadFromStorage();
+        /** @private @type {Array<Function>} */
         this.listeners = [];
     }
 
     /**
-     * Subscribe to cart state updates.
-     * @param {Function} listener - Callback invoked with updated items and totals.
-     * @returns {Function} Unsubscribe function.
+     * Register a callback listener to receive state updates whenever cart mutations occur.
+     *
+     * @param {Function} listener - Function invoked with `(items, totals)`.
+     * @returns {Function} Unsubscribe closure.
      */
     subscribe(listener) {
         if (typeof listener === 'function') {
@@ -216,36 +379,54 @@ class CartService {
 
     /**
      * Notify all registered subscribers of state change.
+     * Wraps individual listener execution in try/catch to ensure an error in one listener
+     * does not abort notifications to subsequent listeners or disrupt domain mutations.
+     * @private
      */
     _notify() {
         const totals = this.getTotals();
+        const items = this.getItems();
         for (const listener of this.listeners) {
             try {
-                listener(this.getItems(), totals);
+                listener(items, totals);
             } catch (err) {
-                console.error('[CartService] Error in state listener:', err);
+                console.error('[CartService] Error in state listener subscriber:', err);
             }
         }
     }
 
     /**
      * Safely load and validate cart items from storage.
-     * Recovers gracefully from corrupted JSON or invalid data structures.
+     * Recovers gracefully from corrupted JSON, non-array structures, or individual malformed records.
+     *
+     * @private
+     * @returns {Array<{name: string, price: number, image: string, quantity: number}>} Validated items list.
      */
     _loadFromStorage() {
         try {
             const raw = this.storage.getItem(CONFIG.STORAGE_KEY);
             if (!raw) return [];
 
-            const parsed = JSON.parse(raw);
+            let parsed;
+            try {
+                parsed = JSON.parse(raw);
+            } catch (syntaxErr) {
+                console.warn('[CartService] Corrupted JSON detected in storage. Resetting to empty cart:', syntaxErr?.message);
+                return [];
+            }
+
             if (!Array.isArray(parsed)) {
-                console.warn('[CartService] Stored cart is not an array. Resetting.');
+                console.warn('[CartService] Stored cart data is not an array. Resetting.');
                 return [];
             }
 
             // Cleanse and validate each item in storage to guarantee schema integrity
             const validated = [];
             for (const candidate of parsed) {
+                if (!candidate || typeof candidate !== 'object') {
+                    console.warn('[CartService] Dropped non-object item record from stored cart:', candidate);
+                    continue;
+                }
                 try {
                     const validItem = this._validateItem(
                         candidate.name,
@@ -261,13 +442,23 @@ class CartService {
             }
             return validated;
         } catch (err) {
-            console.error('[CartService] Failed to parse cart JSON from storage. Resetting to empty cart.', err);
+            console.error('[CartService] Unexpected failure loading cart from storage. Resetting to empty cart:', err);
             return [];
         }
     }
 
     /**
+     * Synchronize in-memory cart state from storage.
+     * Useful for cross-tab synchronization when a storage event is triggered in another window.
+     */
+    syncFromStorage() {
+        this.items = this._loadFromStorage();
+        this._notify();
+    }
+
+    /**
      * Persist current cart items to storage adapter.
+     * @private
      */
     _saveToStorage() {
         try {
@@ -278,8 +469,21 @@ class CartService {
     }
 
     /**
-     * Validate and normalize a candidate item.
-     * @throws {CartValidationError} If inputs are invalid or out of acceptable bounds.
+     * Validate and normalize a candidate cart item.
+     *
+     * Validation Rules:
+     * 1. Product Name: Non-empty string, trimmed, 1 to 120 characters max.
+     * 2. Price: Finite, non-negative numeric value (>= 0), rounded to 2 decimal places.
+     * 3. Quantity: Integer >= 1, capped at 99.
+     * 4. Image: String URL sanitized against javascript: pseudoprotocols, defaulting to SVG placeholder.
+     *
+     * @private
+     * @param {unknown} name - Product title.
+     * @param {unknown} price - Item price.
+     * @param {unknown} image - Image URL or data URI.
+     * @param {unknown} [quantity=1] - Quantity count.
+     * @returns {{ name: string, price: number, image: string, quantity: number }}
+     * @throws {CartValidationError} If any input fails validation rules.
      */
     _validateItem(name, price, image, quantity = 1) {
         // 1. Name validation
@@ -299,7 +503,7 @@ class CartService {
         if (Number.isNaN(numericPrice) || !Number.isFinite(numericPrice) || numericPrice < 0) {
             throw new CartValidationError('Product price must be a non-negative finite number', 'price');
         }
-        // Round price to 2 decimal places to avoid IEEE-754 precision issues
+        // Round price to 2 decimal places using epsilon math to avoid IEEE-754 precision bugs
         const cleanPrice = Math.round((numericPrice + Number.EPSILON) * 100) / 100;
 
         // 3. Quantity validation
@@ -310,9 +514,7 @@ class CartService {
         const cleanQty = Math.min(numericQty, CONFIG.MAX_ITEM_QTY);
 
         // 4. Image normalization
-        const cleanImage = (typeof image === 'string' && image.trim().length > 0)
-            ? image.trim()
-            : CONFIG.DEFAULT_FALLBACK_IMAGE;
+        const cleanImage = sanitizeImageUrl(image);
 
         return {
             name: trimmedName,
@@ -323,19 +525,23 @@ class CartService {
     }
 
     /**
-     * Return a safe deep-copy of current cart items.
+     * Return a safe deep-copy of current cart items to protect internal state from external tampering.
+     * @returns {Array<{name: string, price: number, image: string, quantity: number}>} Array of cloned item objects.
      */
     getItems() {
         return this.items.map(item => ({ ...item }));
     }
 
     /**
-     * Add an item to the cart or increment quantity if already present.
+     * Add an item to the cart, or increment quantity if it already exists.
+     * Enforces the maximum quantity cap of 99 per item.
+     *
      * @param {string} name - Product title.
-     * @param {number|string} price - Item price.
-     * @param {string} [image] - Optional image URL.
+     * @param {number|string} price - Item price in INR.
+     * @param {string|null} [image=null] - Optional image URL or null.
      * @param {number} [quantity=1] - Quantity to add.
-     * @returns {{ item: Object, added: boolean, capped: boolean }} Operation result.
+     * @returns {{ item: {name: string, price: number, image: string, quantity: number}, added: boolean, capped: boolean }} Operation metadata.
+     * @throws {CartValidationError} If parameters fail validation.
      */
     addItem(name, price, image = null, quantity = 1) {
         const validated = this._validateItem(name, price, image, quantity);
@@ -352,7 +558,7 @@ class CartService {
             } else {
                 existing.quantity = desiredQty;
             }
-            // Preserve or update image if a newer valid image is supplied
+            // Preserve or update image if a newer non-default image is supplied
             if (validated.image && validated.image !== CONFIG.DEFAULT_FALLBACK_IMAGE) {
                 existing.image = validated.image;
             }
@@ -374,10 +580,11 @@ class CartService {
 
     /**
      * Modify the quantity of an item by a relative delta (+1, -1).
-     * Automatically removes the item if quantity drops to 0 or below.
+     * Automatically removes the item if the resulting quantity drops to 0 or below.
+     *
      * @param {string} name - Product name.
-     * @param {number} delta - Positive or negative increment.
-     * @returns {{ removed: boolean, item: Object|null }}
+     * @param {number} delta - Positive or negative integer increment.
+     * @returns {{ removed: boolean, item: {name: string, price: number, image: string, quantity: number}|null }}
      */
     updateQuantity(name, delta) {
         if (typeof name !== 'string') return { removed: false, item: null };
@@ -402,9 +609,10 @@ class CartService {
     }
 
     /**
-     * Remove a single item completely from the cart.
+     * Remove a single item completely from the cart by name.
+     *
      * @param {string} name - Product name.
-     * @returns {boolean} True if item was removed, false if not found.
+     * @returns {boolean} True if the item was found and removed, false otherwise.
      */
     removeItem(name) {
         if (typeof name !== 'string') return false;
@@ -421,7 +629,7 @@ class CartService {
     }
 
     /**
-     * Empty all items from the cart.
+     * Empty all items from the cart and clear persisted storage.
      */
     clear() {
         this.items = [];
@@ -431,7 +639,8 @@ class CartService {
 
     /**
      * Calculate summary statistics for the cart.
-     * Uses epsilon-adjusted rounding to prevent JavaScript IEEE-754 precision bugs.
+     * Uses epsilon-adjusted rounding to prevent JavaScript IEEE-754 binary floating point precision bugs.
+     *
      * @returns {{ totalItems: number, totalPrice: number, formattedTotalPrice: string }}
      */
     getTotals() {
@@ -460,22 +669,30 @@ class CartService {
 /**
  * Toast notification subsystem providing user-friendly visual feedback.
  * Features:
- * - HTML entity protection via textContent insertion.
- * - Variant styling (success, error, warning, info).
- * - ARIA live-region compatibility for screen readers.
+ * - HTML entity protection via textContent insertion (immune to XSS).
+ * - Multi-variant styling (success, error, warning, info).
+ * - ARIA live-region compatibility for screen readers (aria-live="polite", role="alert").
+ *
+ * @class ToastManager
  */
 class ToastManager {
-    static ICONS = {
+    static ICONS = Object.freeze({
         success: '✓',
         error: '✕',
         warning: '⚠',
         info: 'ℹ'
-    };
+    });
 
     constructor() {
+        /** @private @type {HTMLElement|null} */
         this.container = null;
     }
 
+    /**
+     * Lazily locate or create the global toast container element.
+     * @private
+     * @returns {HTMLElement|null} Container element or null in headless mode.
+     */
     _getOrCreateContainer() {
         if (typeof document === 'undefined') return null;
         let container = document.getElementById('toast-container');
@@ -491,6 +708,13 @@ class ToastManager {
         return container;
     }
 
+    /**
+     * Display a floating toast notification.
+     *
+     * @param {string} message - Notification text.
+     * @param {'success'|'error'|'warning'|'info'} [type='success'] - Visual variant.
+     * @param {number} [duration=3000] - Display duration in milliseconds before auto-dismissal.
+     */
     show(message, type = 'success', duration = 3000) {
         const container = this._getOrCreateContainer();
         if (!container) return;
@@ -516,10 +740,14 @@ class ToastManager {
         toast.appendChild(messageEl);
         container.appendChild(toast);
 
-        // Trigger entrance transition
-        requestAnimationFrame(() => {
+        // Trigger entrance transition via RAF
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => {
+                toast.classList.add('show');
+            });
+        } else {
             toast.classList.add('show');
-        });
+        }
 
         // Trigger exit and cleanup
         setTimeout(() => {
@@ -538,17 +766,30 @@ class ToastManager {
    ========================================================================== */
 
 /**
- * Cart UI controller responsible for drawer rendering, DOM event delegation,
- * keyboard accessibility, and micro-interactions.
+ * Cart UI controller managing slide-over drawer rendering, DOM event delegation,
+ * keyboard accessibility, focus trapping/restoration, and micro-interactions.
+ *
+ * @class CartUI
  */
 class CartUI {
+    /**
+     * @param {CartService} cartService - Cart domain service instance.
+     * @param {ToastManager} toastManager - Notification presenter.
+     */
     constructor(cartService, toastManager) {
         this.cartService = cartService;
         this.toastManager = toastManager;
+        /** @type {HTMLElement|null} */
         this.drawer = null;
+        /** @type {HTMLElement|null} */
         this.overlay = null;
+        /** @private @type {Element|null} */
+        this.triggerElement = null;
     }
 
+    /**
+     * Initialize DOM structures, event bindings, and subscriptions.
+     */
     init() {
         if (typeof document === 'undefined') return;
 
@@ -557,12 +798,16 @@ class CartUI {
         this._setupKeyboardHandlers();
         this.render();
 
-        // Subscribe to domain model changes
+        // Subscribe to domain model mutations
         this.cartService.subscribe(() => {
             this.render();
         });
     }
 
+    /**
+     * Inject drawer and overlay DOM elements if not already present in the HTML document.
+     * @private
+     */
     _injectCartDrawer() {
         if (document.getElementById('cart-drawer')) {
             this.drawer = document.getElementById('cart-drawer');
@@ -570,7 +815,7 @@ class CartUI {
             return;
         }
 
-        // Overlay element
+        // Overlay backdrop element
         const overlay = document.createElement('div');
         overlay.className = 'cart-drawer-overlay';
         overlay.id = 'cart-drawer-overlay';
@@ -578,7 +823,7 @@ class CartUI {
         document.body.appendChild(overlay);
         this.overlay = overlay;
 
-        // Drawer element with accessibility markup
+        // Drawer element with accessibility markup (dialog role, aria-modal)
         const drawer = document.createElement('aside');
         drawer.className = 'cart-drawer';
         drawer.id = 'cart-drawer';
@@ -608,13 +853,23 @@ class CartUI {
         this.drawer = drawer;
     }
 
+    /**
+     * Attach centralized event listeners using delegation and keyboard handlers.
+     * @private
+     */
     _setupEventListeners() {
-        // 1. Cart Icon toggle in Navbar
+        // 1. Cart Icon toggle in Navbar (handles click and keyboard Enter/Space activation)
         const cartIcons = document.querySelectorAll('.cart-icon');
         cartIcons.forEach(icon => {
             icon.addEventListener('click', (e) => {
                 e.preventDefault();
                 this.open();
+            });
+            icon.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.open();
+                }
             });
         });
 
@@ -641,36 +896,47 @@ class CartUI {
             checkoutBtn.addEventListener('click', () => this.handleCheckout());
         }
 
-        // 6. Event Delegation on Cart Items Container (Prevents quote escaping and inline onclick bugs)
+        // 6. Event Delegation on Cart Items Container
         const itemsContainer = document.getElementById('cart-drawer-items');
         if (itemsContainer) {
             itemsContainer.addEventListener('click', (e) => {
-                const target = e.target;
-                const button = target.closest('button[data-action]');
-                if (!button) return;
+                try {
+                    const target = e.target;
+                    if (!target || !target.closest) return;
 
-                const action = button.getAttribute('data-action');
-                const itemName = button.getAttribute('data-item-name');
-                if (!itemName) return;
+                    const button = target.closest('button[data-action]');
+                    if (!button) return;
 
-                if (action === 'increase') {
-                    const result = this.cartService.updateQuantity(itemName, 1);
-                    if (result.item && result.item.quantity >= CONFIG.MAX_ITEM_QTY) {
-                        this.toastManager.show(`Maximum quantity limit reached for "${itemName}"`, 'warning');
-                    }
-                } else if (action === 'decrease') {
-                    const result = this.cartService.updateQuantity(itemName, -1);
-                    if (result.removed) {
+                    const action = button.getAttribute('data-action');
+                    const itemName = button.getAttribute('data-item-name');
+                    if (!itemName) return;
+
+                    if (action === 'increase') {
+                        const result = this.cartService.updateQuantity(itemName, 1);
+                        if (result.item && result.item.quantity >= CONFIG.MAX_ITEM_QTY) {
+                            this.toastManager.show(`Maximum quantity limit (${CONFIG.MAX_ITEM_QTY}) reached for "${itemName}"`, 'warning');
+                        }
+                    } else if (action === 'decrease') {
+                        const result = this.cartService.updateQuantity(itemName, -1);
+                        if (result.removed) {
+                            this.toastManager.show(`Removed "${itemName}" from cart`, 'info');
+                        }
+                    } else if (action === 'remove') {
+                        this.cartService.removeItem(itemName);
                         this.toastManager.show(`Removed "${itemName}" from cart`, 'info');
                     }
-                } else if (action === 'remove') {
-                    this.cartService.removeItem(itemName);
-                    this.toastManager.show(`Removed "${itemName}" from cart`, 'info');
+                } catch (clickErr) {
+                    console.error('[CartUI] Error handling cart item interaction:', clickErr);
+                    this.toastManager.show('Could not update cart item. Please try again.', 'error');
                 }
             });
         }
     }
 
+    /**
+     * Attach global keyboard listeners for accessibility (Escape key to dismiss drawer).
+     * @private
+     */
     _setupKeyboardHandlers() {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && this.isOpen()) {
@@ -679,30 +945,55 @@ class CartUI {
         });
     }
 
+    /**
+     * Open the shopping cart drawer with focus management.
+     */
     open() {
+        if (typeof document === 'undefined') return;
+        this.triggerElement = document.activeElement;
+
         if (this.drawer && this.overlay) {
             this.drawer.classList.add('open');
             this.overlay.classList.add('open');
             this.overlay.setAttribute('aria-hidden', 'false');
-            // Focus drawer for screen reader accessibility
+
+            // Move focus to drawer close button for screen reader accessibility
             const closeBtn = document.getElementById('cart-drawer-close');
-            if (closeBtn) closeBtn.focus();
+            if (closeBtn) {
+                closeBtn.focus();
+            }
         }
     }
 
+    /**
+     * Close the shopping cart drawer and restore focus to previous trigger element.
+     */
     close() {
         if (this.drawer && this.overlay) {
             this.drawer.classList.remove('open');
             this.overlay.classList.remove('open');
             this.overlay.setAttribute('aria-hidden', 'true');
+
+            // Restore focus to original triggering element
+            if (this.triggerElement && typeof this.triggerElement.focus === 'function') {
+                this.triggerElement.focus();
+            }
         }
     }
 
+    /**
+     * Check if the cart drawer is currently expanded and visible.
+     * @returns {boolean} True if drawer has 'open' class.
+     */
     isOpen() {
         return Boolean(this.drawer && this.drawer.classList.contains('open'));
     }
 
+    /**
+     * Trigger a micro-animation bounce on all cart icons across the page.
+     */
     triggerBounce() {
+        if (typeof document === 'undefined') return;
         const cartIcons = document.querySelectorAll('.cart-icon');
         cartIcons.forEach(icon => {
             icon.classList.remove('animate');
@@ -711,71 +1002,96 @@ class CartUI {
         });
     }
 
+    /**
+     * Render cart state into the DOM: badge counters, item cards, subtotal, and empty states.
+     * Wrapped in an error boundary to prevent unexpected rendering faults from breaking the UI.
+     */
     render() {
         if (typeof document === 'undefined') return;
 
-        const items = this.cartService.getItems();
-        const totals = this.cartService.getTotals();
+        try {
+            const items = this.cartService.getItems();
+            const totals = this.cartService.getTotals();
 
-        // 1. Update navbar badge
-        const badgeEls = document.querySelectorAll('#cart-count');
-        badgeEls.forEach(badge => {
-            badge.textContent = String(totals.totalItems);
-            badge.setAttribute('aria-label', `${totals.totalItems} items in cart`);
-        });
+            // 1. Update navbar badges
+            const badgeEls = document.querySelectorAll('#cart-count');
+            badgeEls.forEach(badge => {
+                badge.textContent = String(totals.totalItems);
+                badge.setAttribute('aria-label', `${totals.totalItems} items in cart`);
+            });
 
-        // 2. Update drawer total price
-        const totalEl = document.getElementById('cart-drawer-total');
-        if (totalEl) {
-            totalEl.textContent = totals.formattedTotalPrice;
-        }
+            // 2. Update drawer total price
+            const totalEl = document.getElementById('cart-drawer-total');
+            if (totalEl) {
+                totalEl.textContent = totals.formattedTotalPrice;
+            }
 
-        // 3. Render items in drawer safely using DOM APIs & HTML escaping
-        const container = document.getElementById('cart-drawer-items');
-        if (!container) return;
+            // 3. Render items in drawer
+            const container = document.getElementById('cart-drawer-items');
+            if (!container) return;
 
-        container.innerHTML = '';
+            container.innerHTML = '';
 
-        if (items.length === 0) {
-            const emptyEl = document.createElement('div');
-            emptyEl.className = 'cart-empty-msg';
-            emptyEl.innerHTML = `
-                <div style="font-size: 40px; margin-bottom: 12px;">🛍️</div>
-                <div>Your cart is empty.</div>
-                <div style="font-size: 13px; color: var(--text-muted); margin-top: 6px;">Add anime collectibles to begin!</div>
-            `;
-            container.appendChild(emptyEl);
-            return;
-        }
+            if (items.length === 0) {
+                const emptyEl = document.createElement('div');
+                emptyEl.className = 'cart-empty-msg';
+                emptyEl.innerHTML = `
+                    <div style="font-size: 40px; margin-bottom: 12px;">🛍️</div>
+                    <div>Your cart is empty.</div>
+                    <div style="font-size: 13px; color: var(--text-muted); margin-top: 6px;">Add anime collectibles to begin!</div>
+                `;
+                container.appendChild(emptyEl);
+                return;
+            }
 
-        // Render each item safely
-        for (const item of items) {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'cart-item';
-            itemEl.setAttribute('role', 'listitem');
+            // Render each item safely using HTML entity escaping
+            for (const item of items) {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'cart-item';
+                itemEl.setAttribute('role', 'listitem');
 
-            const safeName = escapeHtml(item.name);
-            const safePrice = formatCurrency(item.price);
-            const safeImage = escapeHtml(item.image);
+                const safeName = escapeHtml(item.name);
+                const safePrice = formatCurrency(item.price);
+                const safeImage = escapeHtml(item.image);
 
-            itemEl.innerHTML = `
-                <img src="${safeImage}" alt="${safeName}" class="cart-item-img" onerror="this.src='${CONFIG.DEFAULT_FALLBACK_IMAGE}'">
-                <div class="cart-item-info">
-                    <div class="cart-item-name" title="${safeName}">${safeName}</div>
-                    <div class="cart-item-price">${CONFIG.CURRENCY_SYMBOL}${safePrice}</div>
-                    <div class="cart-item-qty-container">
-                        <button class="cart-qty-btn" data-action="decrease" data-item-name="${safeName}" aria-label="Decrease quantity of ${safeName}">-</button>
-                        <span class="cart-item-qty" aria-live="polite">${item.quantity}</span>
-                        <button class="cart-qty-btn" data-action="increase" data-item-name="${safeName}" aria-label="Increase quantity of ${safeName}">+</button>
+                itemEl.innerHTML = `
+                    <img src="${safeImage}" alt="${safeName}" class="cart-item-img" onerror="this.src='${CONFIG.DEFAULT_FALLBACK_IMAGE}'">
+                    <div class="cart-item-info">
+                        <div class="cart-item-name" title="${safeName}">${safeName}</div>
+                        <div class="cart-item-price">${CONFIG.CURRENCY_SYMBOL}${safePrice}</div>
+                        <div class="cart-item-qty-container">
+                            <button class="cart-qty-btn" data-action="decrease" data-item-name="${safeName}" aria-label="Decrease quantity of ${safeName}">-</button>
+                            <span class="cart-item-qty" aria-live="polite">${item.quantity}</span>
+                            <button class="cart-qty-btn" data-action="increase" data-item-name="${safeName}" aria-label="Increase quantity of ${safeName}">+</button>
+                        </div>
                     </div>
-                </div>
-                <button class="cart-item-remove" data-action="remove" data-item-name="${safeName}" title="Remove Item" aria-label="Remove ${safeName} from cart">🗑️</button>
-            `;
+                    <button class="cart-item-remove" data-action="remove" data-item-name="${safeName}" title="Remove Item" aria-label="Remove ${safeName} from cart">🗑️</button>
+                `;
 
-            container.appendChild(itemEl);
+                container.appendChild(itemEl);
+            }
+        } catch (renderError) {
+            console.error('[CartUI] Error during cart rendering:', renderError);
+            const container = document.getElementById('cart-drawer-items');
+            if (container) {
+                container.innerHTML = `
+                    <div class="cart-error-msg">
+                        <div style="font-size: 32px; margin-bottom: 8px;">⚠️</div>
+                        <div>Could not display cart items.</div>
+                        <button class="cart-retry-btn" id="cart-retry-render-btn">Retry</button>
+                    </div>
+                `;
+                const retryBtn = document.getElementById('cart-retry-render-btn');
+                if (retryBtn) {
+                    retryBtn.addEventListener('click', () => this.render());
+                }
+            }
         }
     }
 
+    /**
+     * Clear all cart contents with user confirmation.
+     */
     handleClearCart() {
         const items = this.cartService.getItems();
         if (items.length === 0) {
@@ -783,12 +1099,19 @@ class CartUI {
             return;
         }
 
-        if (typeof window !== 'undefined' && window.confirm('Are you sure you want to clear all items from your cart?')) {
+        const confirmed = (typeof window !== 'undefined' && typeof window.confirm === 'function')
+            ? window.confirm('Are you sure you want to clear all items from your cart?')
+            : true;
+
+        if (confirmed) {
             this.cartService.clear();
             this.toastManager.show('Cart cleared successfully', 'info');
         }
     }
 
+    /**
+     * Simulate checkout process with validation and order summary confirmation.
+     */
     handleCheckout() {
         const items = this.cartService.getItems();
         const totals = this.cartService.getTotals();
@@ -798,8 +1121,7 @@ class CartUI {
             return;
         }
 
-        // In production, this would trigger payment gateway or POST /api/v1/orders/checkout
-        const confirmed = typeof window !== 'undefined'
+        const confirmed = (typeof window !== 'undefined' && typeof window.confirm === 'function')
             ? window.confirm(`Confirm order for ${totals.totalItems} item(s) totalling ${CONFIG.CURRENCY_SYMBOL}${totals.formattedTotalPrice}?`)
             : true;
 
@@ -818,12 +1140,18 @@ class CartUI {
 /**
  * Manages client-side live catalog search and category filtering on product.html,
  * and handles search box submissions from web2.html.
+ *
+ * Synchronizes filter criteria with URL query parameters (?search=... and ?category=...).
  */
 class SearchAndFilterController {
+    /**
+     * Initialize catalog filtering or home page search based on current page markup.
+     */
     static init() {
         if (typeof document === 'undefined') return;
 
-        const isProductPage = window.location.pathname.includes('product.html') || document.querySelector('.products');
+        const isProductPage = (typeof window !== 'undefined' && window.location.pathname.includes('product.html')) ||
+                              document.querySelector('.products');
 
         if (isProductPage) {
             SearchAndFilterController._setupProductPageFiltering();
@@ -834,6 +1162,10 @@ class SearchAndFilterController {
         SearchAndFilterController._setupLoginButtons();
     }
 
+    /**
+     * Set up real-time product search, category filtering, and empty state rendering on product.html.
+     * @private
+     */
     static _setupProductPageFiltering() {
         const searchInput = document.querySelector('.search-box input');
         const searchBtn = document.querySelector('.search-box button');
@@ -842,7 +1174,6 @@ class SearchAndFilterController {
 
         const productCards = Array.from(productsGrid.querySelectorAll('.product'));
 
-        // Helper to perform the filter
         const performFilter = (searchTerm = '', categoryTerm = '') => {
             const cleanSearch = searchTerm.trim().toLowerCase();
             const cleanCategory = categoryTerm.trim().toLowerCase();
@@ -865,7 +1196,7 @@ class SearchAndFilterController {
                 }
             });
 
-            // Handle empty state message
+            // Handle empty state message when zero products match criteria
             let emptyMsg = document.getElementById('products-empty-state');
             if (visibleCount === 0) {
                 if (!emptyMsg) {
@@ -886,8 +1217,8 @@ class SearchAndFilterController {
                 if (resetBtn) {
                     resetBtn.addEventListener('click', () => {
                         if (searchInput) searchInput.value = '';
-                        // Remove URL params safely without full reload
-                        if (window.history && window.history.replaceState) {
+                        // Remove URL params safely without full page reload
+                        if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
                             window.history.replaceState({}, document.title, window.location.pathname);
                         }
                         performFilter('', '');
@@ -899,50 +1230,58 @@ class SearchAndFilterController {
         };
 
         // Check URL query parameters (?search=... or ?category=...)
-        const urlParams = new URLSearchParams(window.location.search);
-        const initialSearch = urlParams.get('search') || '';
-        const initialCategory = urlParams.get('category') || '';
+        if (typeof window !== 'undefined' && window.location) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const initialSearch = urlParams.get('search') || '';
+            const initialCategory = urlParams.get('category') || '';
 
-        if (initialSearch && searchInput) {
-            searchInput.value = initialSearch;
-        }
+            if (initialSearch && searchInput) {
+                searchInput.value = initialSearch;
+            }
 
-        if (initialSearch || initialCategory) {
-            performFilter(initialSearch, initialCategory);
-        }
+            if (initialSearch || initialCategory) {
+                performFilter(initialSearch, initialCategory);
+            }
 
-        // Live typing filter
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                performFilter(e.target.value, initialCategory);
-            });
+            // Live typing search filter
+            if (searchInput) {
+                searchInput.addEventListener('input', (e) => {
+                    performFilter(e.target.value, initialCategory);
+                });
 
-            searchInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
+                searchInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        performFilter(searchInput.value, initialCategory);
+                    }
+                });
+            }
+
+            if (searchBtn && searchInput) {
+                searchBtn.addEventListener('click', (e) => {
                     e.preventDefault();
                     performFilter(searchInput.value, initialCategory);
-                }
-            });
-        }
-
-        if (searchBtn && searchInput) {
-            searchBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                performFilter(searchInput.value, initialCategory);
-            });
+                });
+            }
         }
     }
 
+    /**
+     * Set up search submission and category card redirects from home page (web2.html).
+     * @private
+     */
     static _setupHomePageSearch() {
         const searchInput = document.querySelector('.search-box input');
         const searchBtn = document.querySelector('.search-box button');
 
         const navigateToSearch = () => {
             const query = (searchInput?.value || '').trim();
-            if (query) {
-                window.location.href = `product.html?search=${encodeURIComponent(query)}`;
-            } else {
-                window.location.href = 'product.html';
+            if (typeof window !== 'undefined') {
+                if (query) {
+                    window.location.href = `product.html?search=${encodeURIComponent(query)}`;
+                } else {
+                    window.location.href = 'product.html';
+                }
             }
         };
 
@@ -962,34 +1301,30 @@ class SearchAndFilterController {
             });
         }
 
-        // Category Cards Navigation
-        const categoryCards = document.querySelectorAll('.category-card');
-        categoryCards.forEach(card => {
-            card.style.cursor = 'pointer';
-            card.addEventListener('click', () => {
-                const categoryTitle = card.querySelector('h3')?.textContent?.trim() || '';
-                window.location.href = `product.html?category=${encodeURIComponent(categoryTitle)}`;
-            });
-        });
-
         // Shop Now Button Navigation
         const shopBtns = document.querySelectorAll('.shop-btn');
         shopBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                window.location.href = 'product.html';
-            });
+            if (btn.tagName !== 'A') {
+                btn.addEventListener('click', () => {
+                    if (typeof window !== 'undefined') {
+                        window.location.href = 'product.html';
+                    }
+                });
+            }
         });
     }
 
+    /**
+     * Wire login buttons to display non-intrusive modal notifications.
+     * @private
+     */
     static _setupLoginButtons() {
         const loginBtns = document.querySelectorAll('.login-btn');
         loginBtns.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
-                if (window.toastManager) {
+                if (typeof window !== 'undefined' && window.toastManager) {
                     window.toastManager.show('Guest Collector session active. User accounts arrive in v1.2!', 'info', 4000);
-                } else {
-                    alert('Guest Collector session active. User accounts arrive in v1.2!');
                 }
             });
         });
@@ -997,11 +1332,12 @@ class SearchAndFilterController {
 }
 
 /* ==========================================================================
-   9. SCROLL REVEAL OBSERVER
+   9. SCROLL REVEAL OBSERVER (PROGRESSIVE ENHANCEMENT)
    ========================================================================== */
 
 /**
- * Progressive enhancement IntersectionObserver triggering smooth scroll reveals.
+ * Initializes progressive IntersectionObserver to trigger smooth CSS animations
+ * on `.reveal` elements as they scroll into view.
  */
 function setupScrollReveal() {
     if (typeof document === 'undefined' || typeof IntersectionObserver === 'undefined') return;
@@ -1026,11 +1362,83 @@ function setupScrollReveal() {
 }
 
 /* ==========================================================================
-   10. CENTRALIZED ERROR BOUNDARY
+   10. IMAGE FALLBACK MANAGER (PREVENTS BROKEN GRAPHICS & RECURSIVE LOOPS)
    ========================================================================== */
 
 /**
- * Global error listeners to catch unexpected client exceptions gracefully.
+ * Attaches fault-tolerant error handlers to all image elements on the page.
+ * Replaces failed remote CDN URLs with the built-in SVG placeholder.
+ * Protects against infinite error cascades if the fallback itself triggers an error.
+ */
+function setupImageFallbacks() {
+    if (typeof document === 'undefined') return;
+
+    const images = document.querySelectorAll('img');
+    images.forEach(img => {
+        img.addEventListener('error', () => {
+            // Guard against infinite loop if fallback image somehow triggers error
+            if (!img.dataset.fallbackApplied) {
+                img.dataset.fallbackApplied = 'true';
+                img.src = CONFIG.DEFAULT_FALLBACK_IMAGE;
+            }
+        });
+    });
+}
+
+/* ==========================================================================
+   11. CROSS-TAB STORAGE SYNCHRONIZATION
+   ========================================================================== */
+
+/**
+ * Listens for browser `storage` events to synchronize cart changes across multiple tabs in real-time.
+ *
+ * @param {CartService} service - The cart service to notify when storage updates.
+ */
+function setupStorageSync(service) {
+    if (typeof window === 'undefined' || !service) return;
+
+    window.addEventListener('storage', (event) => {
+        if (event.key === CONFIG.STORAGE_KEY) {
+            service.syncFromStorage();
+        }
+    });
+}
+
+/* ==========================================================================
+   12. COMPONENT-LEVEL FAILURE ISOLATION (ERROR BOUNDARIES)
+   ========================================================================== */
+
+/**
+ * Executes a component initialization routine inside an isolated error boundary.
+ * Prevents an exception in an optional component (e.g. ScrollReveal or SearchFilter)
+ * from aborting the execution of other essential subsystems (e.g. CartUI).
+ *
+ * @param {string} componentName - Descriptive name of the component for logging.
+ * @param {Function} initFn - Initialization closure to execute.
+ * @param {Object} [options={}] - Configuration options.
+ * @param {string|null} [options.userFacingMessage=null] - Optional toast message to display on failure.
+ * @returns {{ success: boolean, error: Error|null }} Execution result summary.
+ */
+function safeInitComponent(componentName, initFn, options = {}) {
+    try {
+        initFn();
+        return { success: true, error: null };
+    } catch (err) {
+        console.error(`[ComponentError] Failed to initialize component "${componentName}":`, err);
+        if (options.userFacingMessage && typeof window !== 'undefined' && window.toastManager) {
+            window.toastManager.show(options.userFacingMessage, 'warning');
+        }
+        return { success: false, error: err };
+    }
+}
+
+/* ==========================================================================
+   13. CENTRALIZED GLOBAL ERROR BOUNDARY
+   ========================================================================== */
+
+/**
+ * Attaches global unhandled error and unhandled Promise rejection listeners.
+ * Surfaces friendly, non-intrusive warning toasts to users without revealing stack traces.
  */
 function setupGlobalErrorBoundary() {
     if (typeof window === 'undefined') return;
@@ -1054,7 +1462,7 @@ function setupGlobalErrorBoundary() {
 }
 
 /* ==========================================================================
-   11. BROWSER INITIALIZATION & BACKWARD COMPATIBLE GLOBAL API
+   14. SINGLETON INSTANTIATION & BACKWARD COMPATIBLE GLOBAL API
    ========================================================================== */
 
 // Instantiate core singletons
@@ -1063,7 +1471,14 @@ const cartService = new CartService(safeStorage);
 const toastManager = new ToastManager();
 const cartUI = new CartUI(cartService, toastManager);
 
-// Global public API functions (maintains 100% backward compatibility with HTML onclick attributes)
+/**
+ * Add a product to the cart with input validation and bounce micro-animation.
+ * Maintains 100% backward compatibility with existing HTML inline `onclick="addToCart(...)"` handlers.
+ *
+ * @param {string} productName - Title of the anime merchandise.
+ * @param {number|string} price - Price in INR.
+ * @param {string|null} [imageUrl=null] - Image URL or extracted dynamically from DOM.
+ */
 function addToCart(productName, price, imageUrl = null) {
     try {
         // Attempt dynamic DOM extraction of image if not explicitly passed
@@ -1099,6 +1514,11 @@ function addToCart(productName, price, imageUrl = null) {
     }
 }
 
+/**
+ * Increment or decrement item quantity from global context.
+ * @param {string} productName - Name of target product.
+ * @param {number} delta - Step adjustment (+1 or -1).
+ */
 function changeQty(productName, delta) {
     try {
         cartService.updateQuantity(productName, delta);
@@ -1107,6 +1527,10 @@ function changeQty(productName, delta) {
     }
 }
 
+/**
+ * Remove an item completely from the cart.
+ * @param {string} productName - Name of product to remove.
+ */
 function removeFromCart(productName) {
     try {
         cartService.removeItem(productName);
@@ -1116,41 +1540,66 @@ function removeFromCart(productName) {
     }
 }
 
+/**
+ * Clear all cart contents.
+ */
 function clearCart() {
     cartUI.handleClearCart();
 }
 
+/**
+ * Proceed to simulated checkout.
+ */
 function checkoutCart() {
     cartUI.handleCheckout();
 }
 
+/**
+ * Open the cart drawer slide-over.
+ */
 function openCartDrawer() {
     cartUI.open();
 }
 
+/**
+ * Close the cart drawer slide-over.
+ */
 function closeCartDrawer() {
     cartUI.close();
 }
 
+/**
+ * Display a toast notification.
+ * @param {string} message - Message text.
+ * @param {'success'|'error'|'warning'|'info'} [type='success'] - Toast variant.
+ */
 function showToast(message, type = 'success') {
     toastManager.show(message, type);
 }
 
+/**
+ * Re-render the cart UI manually.
+ */
 function updateCartUI() {
     cartUI.render();
 }
 
-// Automatically attach image error fallbacks across page
-function setupImageFallbacks() {
-    if (typeof document === 'undefined') return;
-    const images = document.querySelectorAll('img');
-    images.forEach(img => {
-        img.addEventListener('error', () => {
-            if (img.src !== CONFIG.DEFAULT_FALLBACK_IMAGE) {
-                img.src = CONFIG.DEFAULT_FALLBACK_IMAGE;
-            }
-        });
+/* ==========================================================================
+   15. APPLICATION BOOTSTRAP (ISOLATED COMPONENT INITIALIZATION)
+   ========================================================================== */
+
+/**
+ * Bootstrap the entire client application using isolated component boundaries.
+ */
+function bootstrapApplication() {
+    safeInitComponent('GlobalErrorBoundary', setupGlobalErrorBoundary);
+    safeInitComponent('CartUI', () => cartUI.init(), {
+        userFacingMessage: 'Cart drawer interface encountered a setup issue.'
     });
+    safeInitComponent('SearchAndFilterController', () => SearchAndFilterController.init());
+    safeInitComponent('ScrollReveal', setupScrollReveal);
+    safeInitComponent('ImageFallbacks', setupImageFallbacks);
+    safeInitComponent('StorageSynchronization', () => setupStorageSync(cartService));
 }
 
 // Attach to window object for browser access
@@ -1158,14 +1607,19 @@ if (typeof window !== 'undefined') {
     window.CONFIG = CONFIG;
     window.CartValidationError = CartValidationError;
     window.StorageError = StorageError;
+    window.ComponentInitError = ComponentInitError;
     window.SafeStorage = SafeStorage;
     window.CartService = CartService;
     window.ToastManager = ToastManager;
     window.CartUI = CartUI;
+    window.SearchAndFilterController = SearchAndFilterController;
     window.escapeHtml = escapeHtml;
+    window.sanitizeImageUrl = sanitizeImageUrl;
     window.formatCurrency = formatCurrency;
+    window.safeInitComponent = safeInitComponent;
 
     // Singletons
+    window.safeStorage = safeStorage;
     window.cartService = cartService;
     window.toastManager = toastManager;
     window.cartUI = cartUI;
@@ -1181,41 +1635,43 @@ if (typeof window !== 'undefined') {
     window.showToast = showToast;
     window.updateCartUI = updateCartUI;
 
-    // Initialize on DOMContentLoaded
+    // Bootstrap on DOM ready
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            setupGlobalErrorBoundary();
-            cartUI.init();
-            SearchAndFilterController.init();
-            setupScrollReveal();
-            setupImageFallbacks();
-        });
+        document.addEventListener('DOMContentLoaded', bootstrapApplication);
     } else {
-        setupGlobalErrorBoundary();
-        cartUI.init();
-        SearchAndFilterController.init();
-        setupScrollReveal();
-        setupImageFallbacks();
+        bootstrapApplication();
     }
 }
 
-// Module export for Node.js test runner
+// Module exports for Node.js automated unit testing
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         CONFIG,
         CartValidationError,
         StorageError,
+        ComponentInitError,
         SafeStorage,
         CartService,
         ToastManager,
         CartUI,
         SearchAndFilterController,
         escapeHtml,
+        sanitizeImageUrl,
         formatCurrency,
+        safeInitComponent,
+        setupScrollReveal,
+        setupImageFallbacks,
+        setupStorageSync,
+        setupGlobalErrorBoundary,
+        bootstrapApplication,
         addToCart,
         changeQty,
         removeFromCart,
         clearCart,
-        checkoutCart
+        checkoutCart,
+        openCartDrawer,
+        closeCartDrawer,
+        showToast,
+        updateCartUI
     };
 }

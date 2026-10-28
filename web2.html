@@ -5,12 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🐳 ANiii STORE - Premium Anime Merchandise</title>
     <meta name="description" content="Discover premium anime figures, posters, keychains, apparel and accessories at ANiii STORE. High quality merchandise with express global shipping.">
+    <!-- Centralized Stylesheet: Design tokens, glassmorphic navbar, animated gradient, responsive layouts -->
     <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
 
-    <!-- NAVBAR -->
+    <!--
+      NAVBAR: Centered Glassmorphic Navigation Header
+      - Includes brand logo, primary navigation links, search input, and interactive cart badge.
+      - Cart icon is keyboard accessible (role="button", tabindex="0", Enter/Space key triggers).
+      - Badge (#cart-count) updates dynamically via CartService subscription and cross-tab storage events.
+    -->
     <nav class="navbar" role="navigation" aria-label="Main Navigation">
         <div class="navbar-container">
             <a href="web2.html" class="logo" style="text-decoration: none;">
@@ -24,21 +30,24 @@
             </ul>
 
             <div class="nav-right">
+                <!-- Search Box: Bridges home page search submissions directly to product.html?search=... -->
                 <div class="search-box">
                     <input type="text" placeholder="Search anime products..." aria-label="Search anime products">
                     <button aria-label="Search">🔍</button>
                 </div>
 
+                <!-- Shopping Cart Trigger: Opens slide-out drawer via CartUI -->
                 <div class="cart-icon" role="button" tabindex="0" aria-label="View Shopping Cart">
                     🛒 <span id="cart-count" aria-live="polite">0</span>
                 </div>
 
+                <!-- Guest Collector Login / Account Status -->
                 <button class="login-btn" aria-label="User Account">Login</button>
             </div>
         </div>
     </nav>
 
-    <!-- HERO SECTION -->
+    <!-- HERO SECTION: Visual Banner with Dynamic Anime Showcase Cards -->
     <header class="hero">
         <div class="overlay"></div>
 
@@ -62,13 +71,18 @@
                 Shop Now
             </a>
 
+            <!-- Showcase Anime Graphics with Lazy Loading and Error Resilience -->
             <img src="https://4kwallpapers.com/images/walls/thumbs_2t/23027.jpg" alt="Featured Anime Art 1" class="anime-card card1" loading="lazy">
             <img src="https://wallpapercave.com/wp/wp8553732.jpg" alt="Featured Anime Art 2" class="anime-card card2" loading="lazy">
             <img src="https://m.media-amazon.com/images/I/81Xt070VKIL._AC_UF894,1000_QL80_.jpg" alt="Featured Anime Art 3" class="anime-card card3" loading="lazy">
         </div>
     </header>
 
-    <!-- CATEGORIES SECTION -->
+    <!--
+      CATEGORIES SECTION: Deep-Linking Grid
+      - Each card links directly to product.html?category=<type>
+      - SearchAndFilterController parses the URL parameter and pre-filters the catalog on arrival.
+    -->
     <main>
         <section class="categories" id="categories" aria-label="Product Categories">
             <div class="category-header">
@@ -109,7 +123,7 @@
             </div>
         </section>
 
-        <!-- VALUE PROPOSITIONS / FEATURES SECTION -->
+        <!-- VALUE PROPOSITIONS: Progressive Scroll Reveal Features -->
         <section class="features" aria-label="Store Benefits">
             <div class="feature-box reveal">
                 <div class="icon">🔒</div>
@@ -143,7 +157,7 @@
         </section>
     </main>
 
-    <!-- FOOTER -->
+    <!-- FOOTER: Store Links, Customer Service, Legal & Attribution -->
     <footer class="footer">
         <div class="footer-container reveal">
             <div class="footer-section">
@@ -181,7 +195,10 @@
         </div>
     </footer>
 
-    <!-- SCRIPTS -->
+    <!--
+      CORE JAVASCRIPT: State Controller, Presenter & Error Boundary
+      - Automatically bootstraps CartService, SafeStorage, CartUI, SearchController, and ImageFallbacks.
+    -->
     <script src="cart.js"></script>
 
 </body>

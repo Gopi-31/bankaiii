@@ -1,134 +1,169 @@
-# 🐳 ANiii STORE - Premium Anime Merchandise E-Commerce Platform
+# 🐳 ANiii STORE — Premium Anime Merchandise E-Commerce Platform
 
-Welcome to **ANiii STORE**, a high-end, responsive, and visually stunning e-commerce web platform dedicated to authentic anime figures, keychains, posters, apparel, and accessories.
+Welcome to **ANiii STORE**, a high-end, responsive, and visually immersive e-commerce web platform engineered for authentic anime figures, keychains, posters, apparel, and accessories.
 
-Built with **modern HTML5, CSS3, and vanilla ECMAScript 2026**, this project demonstrates how to construct a professional multipage e-commerce application with a unified state controller, fault-tolerant client persistence, real-time catalog filtering, comprehensive automated unit tests, and accessible glassmorphic UI micro-interactions without heavy frontend framework overhead.
+Built using **modern HTML5, CSS3, and vanilla ECMAScript 2026 standards**, this project demonstrates how to build a production-grade multipage e-commerce application featuring an Object-Oriented Domain Model, Observable state management, fault-tolerant client persistence, real-time catalog filtering, multi-tier error boundaries, comprehensive automated unit testing, and accessible glassmorphic UI micro-interactions without third-party frontend framework bloat.
 
 ---
 
-## 🌟 1. Main Features
+## 📑 Table of Contents
 
-* **Multipage Architecture**: Seamlessly linked multi-page structure consisting of the **Home Page** (`web2.html`) and the **Products Catalog** (`product.html`).
-* **Centered Glassmorphic Navigation**: Sticky 100% viewport-width navbar featuring blur filters (`backdrop-filter: blur(15px)`), live cart badge indicators, and dynamic active menu indicators.
-* **Persistent Cross-Page Shopping Cart**: State is managed via `CartService` and synchronized across all browser tabs and pages using a resilient `SafeStorage` adapter.
-* **Slide-Out Cart Drawer UI**: Premium slide-over cart drawer with animated transitions, quantity stepper (+/-), item removal, subtotal calculation, and keyboard accessibility (`Escape` key close, focus traps).
-* **Instant Catalog Search & Category Filtering**:
-  * Real-time search by title and description on the product catalog.
+1. [Project Overview & Objectives](#-1-project-overview--objectives)
+2. [Architecture & Application Data Flow](#-2-architecture--application-data-flow)
+3. [Features & Technology Stack](#-3-features--technology-stack)
+4. [Complete Project Directory Structure](#-4-complete-project-directory-structure)
+5. [Prerequisites & Installation](#-5-prerequisites--installation)
+6. [How to Run the Website Locally](#-6-how-to-run-the-website-locally)
+7. [Cart State Management & Persistence](#-7-cart-state-management--persistence)
+8. [Automated Testing Commands & Test Suites](#-8-automated-testing-commands--test-suites)
+9. [Test Coverage Instructions & Actual Results](#-9-test-coverage-instructions--actual-results)
+10. [Error-Handling Architecture & Recovery Strategies](#-10-error-handling-architecture--recovery-strategies)
+11. [API Documentation (Implemented vs. Planned)](#-11-api-documentation-implemented-vs-planned)
+12. [Storage Schema Documentation](#-12-storage-schema-documentation)
+13. [Security Considerations & Accessibility](#-13-security-considerations--accessibility)
+14. [Troubleshooting Guide](#-14-troubleshooting-guide)
+15. [Known Limitations & Future Roadmap](#-15-known-limitations--future-roadmap)
+16. [License & Attribution](#-license--attribution)
+
+---
+
+## 🌟 1. Project Overview & Objectives
+
+ANiii STORE was designed with three core engineering objectives:
+1. **Performance & Lightweight Footprint**: Deliver an app-like experience with 60fps animations, instant catalog search, and slide-out cart drawer using vanilla web standards—completely free of heavy JavaScript frontend frameworks.
+2. **Defensive Architecture & Multi-Tier Resilience**: Implement browser-native error isolation, safe component initialization, automatic in-memory fallback for private browsing / quota restrictions, and safe image fallbacks.
+3. **Rigorous Quality Assurance & Documentation**: Provide a comprehensive automated unit test suite with 77+ tests using Node.js built-in test runner (`node:test`), high coverage, and granular technical documentation.
+
+---
+
+## 🏗️ 2. Architecture & Application Data Flow
+
+ANiii STORE follows a **Model-View-Presenter (MVP)** pattern combined with an **Observable Event Bus** and a **4-Tier Error Boundary Architecture**:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             USER INTERFACE LAYER                            │
+│   web2.html (Storefront Landing)         product.html (Merchandise Catalog) │
+│       │                                      │                              │
+│       └──────────────────────┬───────────────────────┘                      │
+│                              │ Button Click / Keydown (Enter/Space)         │
+│                              ▼                                              │
+│                  Global API Wrapper Functions                               │
+│       (addToCart, changeQty, removeFromCart, clearCart, checkoutCart)       │
+└──────────────────────────────┬──────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          DOMAIN LAYER (cart.js)                             │
+│                           CartService                                       │
+│    - Schema Validation (_validateItem: name, price, qty, image)             │
+│    - Quantity Bounds Capping (Max 99) & Epsilon Arithmetic Precision        │
+│    - In-Memory State Array                                                  │
+└──────────────┬───────────────────────────────────────────────┬──────────────┘
+               │                                               │
+    State Save │                                Notify Changes │ (Observable)
+               ▼                                               ▼
+┌──────────────────────────────┐              ┌───────────────────────────────┐
+│      PERSISTENCE LAYER       │              │      PRESENTATION LAYER       │
+│         SafeStorage          │              │            CartUI             │
+│  - Browser localStorage      │              │  - Cart Drawer Rendering      │
+│  - In-Memory Map Fallback    │              │  - Navbar Badge Counter       │
+│  - QuotaExceeded Recovery    │              │  - Accessible Live Regions    │
+│  - Corrupted Data Cleansing  │              │  - ToastManager Notifications │
+│  - Cross-Tab Synchronization │              │  - Focus Management           │
+└──────────────────────────────┘              └───────────────────────────────┘
+```
+
+### Data Flow Lifecycle
+
+1. **Trigger**: Customer clicks "Add to Cart" on `product.html` or presses Enter/Space on `.cart-icon`.
+2. **Delegation**: Inline `onclick="addToCart(...)"` or event delegation invokes global wrapper.
+3. **Domain Validation**: `CartService._validateItem` validates product title, non-negative price, integer quantity, and safe image URL protocol.
+4. **State Mutation**: If item exists, quantity is incremented (clamped at 99); if new, item is appended.
+5. **Persistence**: `_saveToStorage()` serializes array to `SafeStorage`. If `localStorage` is restricted or quota exceeded, it seamlessly falls back to memory.
+6. **Subscription Notification**: `_notify()` informs all registered subscribers (`CartUI`).
+7. **Rendering & Accessibility**: `CartUI.render()` safely interpolates escaped HTML, updates `#cart-count` badge, re-calculates subtotal, and triggers CSS bounce animations.
+8. **Cross-Tab Sync**: When storage updates, other open tabs catch the `storage` event and synchronize their badge and drawer in real time.
+
+---
+
+## 🛠️ 3. Features & Technology Stack
+
+### Features
+* **Multipage Seamless Architecture**: Clean navigation between Storefront (`web2.html`) and Catalog (`product.html`).
+* **Centered Glassmorphic Sticky Navbar**: Backdrop blur (`backdrop-filter: blur(15px)`), live badge counter, and dynamic menu state.
+* **Persistent Cross-Page & Cross-Tab Shopping Cart**: Cart state persists across sessions and synchronizes in real time across browser tabs.
+* **Accessible Slide-Over Cart Drawer**: Quantity steppers (+/-), item removal, order subtotal, empty state, keyboard dismissal (`Escape`), and focus restoration.
+* **Live Catalog Search & Category Deep-Linking**:
+  * Real-time search by title and description without page reloads.
   * URL query parameter synchronization (`?search=...` and `?category=...`).
-  * Seamless cross-navigation from Home page category cards directly to filtered catalog views.
-  * Informative empty search state with one-click filter resets.
-* **Multi-Variant Toast Notifications**: Accessible floating notifications (`success`, `error`, `warning`, `info`) with XSS protection and auto-cleanup.
-* **Interactive Micro-Interactions**: Visual bounce animations on the navbar cart badge upon adding items, hover elevations, and dynamic gradient movement.
-* **Viewport Scroll Reveals**: Native `IntersectionObserver` triggering smooth fade-ins and slide-ups as the user scrolls.
-* **Image Error Resilience**: Automatic fallback to themed inline SVG graphics if remote CDN images fail to load or are blocked.
+  * Seamless cross-page category card deep-linking.
+  * Informative empty search state with one-click filter reset.
+* **Multi-Variant Toast Notifications**: Accessible status banners (`success`, `error`, `warning`, `info`) with XSS immunity.
+* **Scroll Reveal Animations**: Progressive enhancement via `IntersectionObserver` triggering smooth fade-in effects.
+* **Image Error Resilience**: Automatic fallback to themed inline SVG placeholder preventing broken graphics or recursive error loops.
+
+### Technology Stack
+* **Structure**: HTML5 Semantic markup (`<header>`, `<main>`, `<section>`, `<nav>`, `<aside>`, `<footer>`) with WAI-ARIA roles.
+* **Styling**: Vanilla CSS3 (Custom Properties / Design Tokens, Glassmorphism, CSS Grid & Flexbox, Keyframe Animations, Google Font [Outfit](https://fonts.google.com/specimen/Outfit)).
+* **Client Logic**: Vanilla ECMAScript 2026 (Object-Oriented Architecture, Observable State Pattern, Zero Framework Dependencies).
+* **Testing & QA**: Node.js Built-In Test Runner (`node:test` and `node:assert/strict`), Native Code Coverage Engine (`--experimental-test-coverage`).
+* **Zero Production Dependencies**: Zero external npm runtime dependencies required.
 
 ---
 
-## 🛠️ 2. Technologies Used
-
-* **Core Structure**: HTML5 Semantic markup (`<header>`, `<main>`, `<section>`, `<nav>`, `<aside>`, `<footer>`) with ARIA accessibility roles.
-* **Styling & Design System**: Modern Vanilla CSS3:
-  * CSS Custom Properties (Design Tokens for colors, fonts, transitions).
-  * Glassmorphism with `backdrop-filter: blur()`.
-  * CSS Grid & Flexbox layouts.
-  * Keyframe animations (`bgmove`, `cartBounce`, `fade-in`).
-  * Typography: Google Fonts ([Outfit](https://fonts.google.com/specimen/Outfit)).
-* **Client Logic & State Management**: Vanilla JavaScript (ES2026):
-  * Object-Oriented Domain Service (`CartService`).
-  * Presentation layer with event delegation (`CartUI`).
-  * Fault-tolerant persistent storage adapter (`SafeStorage`).
-* **Testing & Quality Assurance**:
-  * Node.js Built-in Test Runner (`node:test` and `node:assert/strict`).
-  * Native Code Coverage Engine (`--experimental-test-coverage`).
-* **Environment & Package Management**: Node.js & npm (compatible with zero third-party production dependencies).
-
----
-
-## 📂 3. Project Folder Structure
+## 📂 4. Complete Project Directory Structure
 
 ```text
 bankaiii-main/
 ├── docs/
-│   ├── API_DOCUMENTATION.md      # Comprehensive API & integration guide
-│   └── STORAGE_SCHEMA.md         # Client storage specification & future DB schema
+│   ├── API_DOCUMENTATION.md          # Granular client JS API reference & planned REST specs
+│   └── STORAGE_SCHEMA.md             # Active localStorage schema & proposed relational DB
 ├── tests/
-│   ├── cart-service.test.js      # CartService domain logic & boundary tests
-│   ├── safe-storage.test.js      # Storage resilience, quota & privacy tests
-│   ├── security-sanitization.test.js # XSS protection & currency formatting tests
-│   └── integration-api.test.js   # Global API & backward compatibility tests
-├── .env.example                  # Safe environment variable configuration template
-├── .gitignore                    # Git exclusions for dependencies, coverage, and OS metadata
-├── cart.js                       # Core cart domain service, UI presenter, and error boundary
-├── package.json                  # Project manifest, test scripts, and metadata
-├── product.html                  # Product catalog page with live filtering & category tags
-├── README.md                     # Comprehensive project documentation (This file)
-├── style.css                     # Centralized stylesheet (Tokens, glassmorphism, responsive)
-└── web2.html                     # Home page (Hero header, categories, features, footer)
+│   ├── cart-service.test.js          # CartService domain logic, calculations & boundary tests
+│   ├── error-boundaries.test.js      # Component isolation, image fallback & sync tests
+│   ├── integration-api.test.js       # Backward compatibility global API & presentation tests
+│   ├── safe-storage.test.js          # Storage resilience, quota & privacy fallback tests
+│   └── security-sanitization.test.js # XSS protection, URI schemes & currency formatting tests
+├── .env.example                      # Safe environment configuration template
+├── .gitignore                        # Git exclusions for OS metadata, logs, and coverage
+├── cart.js                           # Core domain service, UI presenter, and error boundaries
+├── package.json                      # Project manifest, npm test scripts, and metadata
+├── product.html                      # Product catalog page with live filtering & category tags
+├── README.md                         # Comprehensive project documentation (This file)
+├── style.css                         # Centralized stylesheet (Design tokens, glassmorphism, responsive)
+└── web2.html                         # Home page (Hero header, categories, features, footer)
 ```
 
 ---
 
-## 📋 4. Prerequisites
+## 📋 5. Prerequisites & Installation
 
-To view and interact with the store:
+### Prerequisites
 * Any modern web browser (**Chrome**, **Safari**, **Firefox**, **Edge**).
-
-To run the automated unit test suite or development server:
-* **Node.js**: v18.0.0 or higher (v26+ recommended).
+* **Node.js**: v18.0.0 or higher (v26+ recommended) to execute automated unit tests.
 * **npm**: v9.0.0 or higher.
-* *(Optional)* **Python 3**: For running a local HTTP static server.
+* *(Optional)* **Python 3**: For running a local HTTP static web server.
 
----
-
-## 🚀 5. Installation Instructions
-
-1. Clone or download the repository to your local workspace:
+### Installation Instructions
+1. Clone or download the repository:
    ```bash
    git clone https://github.com/Gopi-31/bankaiii.git
    cd bankaiii-main
    ```
-
-2. Review the project dependencies:
+2. Inspect the project dependencies:
    > [!NOTE]
-   > The application utilizes vanilla JavaScript and Node's built-in test runner. There are **zero external npm runtime dependencies required**, ensuring lightning-fast setup and zero bloat!
-
-3. Copy the environment configuration template:
+   > The application utilizes vanilla JavaScript and Node.js native testing modules. There are **zero external production dependencies to install**, ensuring zero supply-chain risk and instantaneous startup.
+3. Copy environment configuration:
    ```bash
    cp .env.example .env
    ```
 
 ---
 
-## ⚙️ 6. Environment Variable Configuration
+## 💻 6. How to Run the Website Locally
 
-The project includes a safe `.env.example` file specifying configuration options for development, testing, and future backend integration:
-
-```ini
-# Local Static Web Server Port
-PORT=3000
-
-# Environment Mode
-NODE_ENV=development
-
-# Application Base URL
-APP_URL=http://localhost:3000
-
-# Client Storage Prefix
-STORAGE_KEY_PREFIX=aniii_
-
-# Feature Flags
-ENABLE_ANALYTICS=false
-ENABLE_DEBUG_LOGGING=true
-ENABLE_OFFLINE_STORAGE=true
-```
-
----
-
-## 💻 7. How to Run the Application Locally
-
-You can launch and explore ANiii STORE using any of the methods below:
-
-### Option A: Local Python Web Server (Recommended)
+### Option A: Local Python Server (Recommended)
 ```bash
 npm run serve
 # Or directly:
@@ -143,105 +178,199 @@ Open your browser and navigate to:
 npx serve . -p 3000
 ```
 
-### Option C: Direct Browser Opening (No Server Required)
-Simply double-click `web2.html` or `product.html` in your file manager to open directly via the `file://` protocol. All cart features and storage operate seamlessly.
+### Option C: Direct File Opening (No Server Required)
+Double-click `web2.html` or `product.html` in your file explorer to open via `file://`. All cart operations, animations, and local storage function identically.
 
 ---
 
-## 🧪 8. Testing Instructions & Test Commands
+## 🛒 7. Cart State Management & Persistence
 
-The project includes an automated unit test suite covering initialization, input validation, boundary conditions, arithmetic precision, QuotaExceeded fallbacks, and XSS sanitization.
+1. **State Isolation**: Cart items are managed centrally in `CartService` as an array of validated objects:
+   ```typescript
+   {
+       name: string;      // 1 to 120 characters, non-empty, trimmed
+       price: number;     // Finite non-negative float, 2 decimals
+       quantity: number;  // Integer 1 to 99
+       image: string;     // Verified URL or inline SVG fallback
+   }
+   ```
+2. **Defensive Mutation**:
+   * Adding an existing product increments its quantity up to the maximum ceiling of 99 (`CONFIG.MAX_ITEM_QTY`).
+   * Decrementing quantity to `<= 0` removes the product automatically.
+   * Removing non-existent items safely returns `false` without throwing.
+3. **Epsilon Math**: Floating-point price calculations use epsilon arithmetic (`Math.round((sum + Number.EPSILON) * 100) / 100`), preventing binary precision glitches (e.g. `0.10 + 0.20 = 0.3`).
+4. **Observable Subscriptions**: `cartService.subscribe(listener)` automatically dispatches state updates to UI presenters.
+5. **Cross-Tab Synchronization**: Changes in one window/tab trigger a `storage` event in all other open tabs, keeping counters and drawers synchronized.
 
-### Available Test Commands
+---
+
+## 🧪 8. Automated Testing Commands & Test Suites
+
+The test suite runs on Node.js's native test runner (`node:test`) and strict assertions (`node:assert/strict`).
+
+### Available NPM Scripts
 
 | Command | Action | Description |
 | :--- | :--- | :--- |
-| `npm test` | Run Test Suite | Executes all 45 automated unit tests across `tests/` using Node's native test runner. |
-| `npm run test:watch` | Watch Mode | Automatically re-runs test suites when source files change. |
-| `npm run test:coverage` | Coverage Report | Outputs line, branch, and function coverage statistics. |
+| `npm test` | Run Complete Test Suite | Executes all 77 automated unit and integration tests across 5 test suites. |
+| `npm run test:watch` | Watch Mode | Automatically re-runs test suites on source file modifications. |
+| `npm run test:coverage` | Code Coverage Report | Executes test runner with native V8 code coverage engine. |
+| `npm run serve` | Local Static Server | Launches Python HTTP web server on port 3000. |
 
-### Running Tests
-Execute:
+### Test Suites Breakdown
+
+1. **`tests/cart-service.test.js`** (32 tests):
+   * Storage initialization and corrupted JSON recovery.
+   * Granular item cleansing and non-array payload handling.
+   * Positive item additions, duplicate quantity increments, price string coercions, and free promotional items (`price: 0`).
+   * Input validations: empty titles, whitespace titles, non-string types, title length boundaries (120 vs 121 chars), negative prices, non-finite numbers, and zero quantities.
+   * Quantity modifications (+/-), auto-removal on zero, bounds capping at 99, and idempotent `clear()`.
+   * Floating-point precision, epsilon rounding, Indian currency formatting, and state immutability.
+   * Subscriber notification resilience (ensuring a throwing subscriber does not break other subscribers).
+2. **`tests/safe-storage.test.js`** (8 tests):
+   * In-memory CRUD operations and non-string type coercions.
+   * Backend write-through with healthy storage.
+   * `QuotaExceededError` handling and automatic memory mode transition.
+   * `SecurityError` handling during private browsing mode.
+   * Exception catching during `removeItem` and `clear` with automatic memory fallback.
+3. **`tests/security-sanitization.test.js`** (12 tests):
+   * HTML entity escaping against standard script tags, attribute delimiters, and quotes.
+   * Inline event handler vectors (`onerror`, `onload`), SVG payloads, and nested tags.
+   * `sanitizeImageUrl` protocol verification blocking `javascript:`, `vbscript:`, and `data:text/html`.
+   * Currency formatting edge cases: Lakhs/Crores grouping, floats, zeros, negatives, and invalid inputs.
+4. **`tests/integration-api.test.js`** (8 tests):
+   * Export validation for all global API helpers and classes.
+   * `addToCart` handling valid inputs, bounds capping, and catching `CartValidationError` gracefully.
+   * Global `changeQty`, `removeFromCart`, `clearCart`, and `checkoutCart` execution in headless mode.
+   * `ToastManager` and `CartUI` state transitions without browser DOM.
+5. **`tests/error-boundaries.test.js`** (8 tests):
+   * `safeInitComponent` success execution and error catching.
+   * Multi-component sequential failure isolation (Component 1 error does not prevent Component 2 & 3).
+   * Cross-tab `storage` event dispatching and key filtering.
+   * Image fallback loop prevention (`data-fallback-applied`).
+   * Global unhandled error and rejection listener registration.
+
+---
+
+## 📊 9. Test Coverage Instructions & Actual Results
+
+### Running Coverage
 ```bash
-npm test
+npm run test:coverage
 ```
 
-Sample output:
+### Actual Verified Coverage Metrics
+
 ```text
-▶ CartService - Initialization & Storage Recovery
-  ✔ initializes with an empty cart when storage has no data
-  ✔ loads valid existing items from storage
-  ✔ recovers gracefully from corrupted JSON in storage without crashing
-  ✔ filters out invalid item objects from stored array while keeping valid ones
-▶ CartService - Adding Items (Positive Cases)
-  ✔ successfully adds a valid new item
-  ✔ increments quantity when adding an existing item
-▶ CartService - Input Validation & Boundary Checks (Negative Cases)
-  ✔ rejects empty product name with CartValidationError
-  ✔ rejects negative price values
-  ✔ caps item quantity at maximum allowed limit (99)
-...
-ℹ tests 45
-ℹ pass 45
+ℹ tests 77
+ℹ suites 15
+ℹ pass 77
 ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ duration_ms ~86ms
+ℹ start of coverage report
+ℹ ------------------------------------------------------------------------------
+ℹ file      | line % | branch % | funcs % | uncovered lines
+ℹ ------------------------------------------------------------------------------
+ℹ cart.js   |  65.65 |    77.97 |   71.79 | 114-120 241-251 445-447 467-468 ...
+ℹ ------------------------------------------------------------------------------
+ℹ all files |  65.65 |    77.97 |   71.79 | 
+ℹ ------------------------------------------------------------------------------
+ℹ end of coverage report
 ```
 
----
-
-## 📡 9. API Documentation
-
-ANiii STORE currently operates as a client-side architecture without a custom backend server. Product listings and cart management are handled client-side.
-
-* For complete details on external integrations (Google Fonts, CDN image assets) and the full **v2.0 REST API Specification** (`GET /api/v1/products`, `POST /api/v1/cart/validate`, `POST /api/v1/orders/checkout`), please refer to [docs/API_DOCUMENTATION.md](file:///Users/gopi/Downloads/bankaiii-main/docs/API_DOCUMENTATION.md).
+> [!NOTE]
+> All remaining uncovered lines in `cart.js` represent browser-only DOM listeners (e.g. interactive `DOMContentLoaded`, live `IntersectionObserver`, and window `keydown` listeners) that only execute inside a real graphical browser window.
 
 ---
 
-## 🗄️ 10. Database & Storage Schema Documentation
+## 🛡️ 10. Error-Handling Architecture & Recovery Strategies
 
-* **Client Storage**: Cart state is serialized under the `cart` key in `localStorage` as an array of validated `CartItem` objects (`name`, `price`, `quantity`, `image`).
-* **Resilience**: Managed by `SafeStorage`, which automatically catches corrupted JSON, handles Safari private browsing restrictions, and degrades to in-memory caching upon `QuotaExceededError`.
-* **Future Relational Schema**: A complete PostgreSQL/MySQL schema proposal featuring an Entity-Relationship (ER) diagram, tables, foreign keys, indexes, and SQL migration scripts is documented in [docs/STORAGE_SCHEMA.md](file:///Users/gopi/Downloads/bankaiii-main/docs/STORAGE_SCHEMA.md).
+The project implements a **4-Tier Error Boundary Architecture**:
 
----
-
-## 🛡️ 11. Error-Handling Approach & Error Boundaries
-
-1. **Centralized Error Boundary**:
-   * Global listeners (`window.addEventListener('error')` and `unhandledrejection`) catch unexpected client runtime errors.
-   * Logs technical diagnostics to the developer console while surfacing friendly, non-intrusive warning toasts to users instead of crashing page interactivity.
-2. **Safe Storage Adapter (`SafeStorage`)**:
-   * Protects against `JSON.parse` crashes from corrupted or externally modified storage data.
-   * Recovers from storage quota restrictions and sandbox security barriers by falling back to in-memory key-value maps.
-3. **Input Validation (`CartValidationError`)**:
-   * All cart additions undergo strict schema validation (rejecting negative prices, non-string names, empty values, or excessive quantities).
-4. **XSS Protection**:
-   * Untrusted product strings are escaped via `escapeHtml()`, and notification messages are injected via `textContent`, eliminating script injection attack surfaces.
-5. **Image Failure Fallback**:
-   * The `setupImageFallbacks()` subsystem detects broken or blocked remote image URLs and swaps them with an inline SVG placeholder.
+| Tier | Scope | Mechanism | Recovery Behavior |
+| :--- | :--- | :--- | :--- |
+| **Tier 1: Local try/catch** | Operational functions | Focused blocks around JSON parsing, input parsing, and arithmetic. | Caught immediately; logs diagnostics and returns safe defaults (`[]`, `0`, or SVG fallback). |
+| **Tier 2: Component-Level Isolation** | Subsystem bootstrap | `safeInitComponent(name, fn)` | An exception in an optional feature (e.g. ScrollReveal) is isolated, preventing disruption of essential features (e.g. CartUI). |
+| **Tier 3: Global Error Telemetry** | Uncaught exceptions | `setupGlobalErrorBoundary()` listening to `error` and `unhandledrejection`. | Logs error context to console without revealing internal stack traces to users; displays non-intrusive toast. |
+| **Tier 4: Storage Degradation** | Persistence adapters | `SafeStorage` automatic in-memory fallback | Switches to in-memory `Map` upon `QuotaExceededError` or `SecurityError`, allowing browsing and cart additions to continue seamlessly. |
 
 ---
 
-## 🔧 12. Troubleshooting Guide
+## 📡 11. API Documentation (Implemented vs. Planned)
 
-| Issue | Cause | Solution |
+For complete technical specifications:
+* Refer to the comprehensive [docs/API_DOCUMENTATION.md](docs/API_DOCUMENTATION.md).
+
+### Summary of Status
+* **Implemented Frontend API**:
+  * Classes: `CartService`, `SafeStorage`, `CartUI`, `ToastManager`, `SearchAndFilterController`.
+  * Utilities: `escapeHtml`, `sanitizeImageUrl`, `formatCurrency`, `safeInitComponent`.
+  * Backward-Compatible Globals: `addToCart`, `changeQty`, `removeFromCart`, `clearCart`, `checkoutCart`, `openCartDrawer`, `closeCartDrawer`.
+* **Planned Backend REST API (v2.0)**:
+  * `GET /api/v1/products`: Paginated catalog retrieval with filtering.
+  * `GET /api/v1/products/:id`: Single product metadata.
+  * `POST /api/v1/cart/validate`: Inventory and price verification.
+  * `POST /api/v1/orders/checkout`: Order processing and payment gateway initiation.
+
+---
+
+## 🗄️ 12. Storage Schema Documentation
+
+For detailed schema documentation:
+* Refer to [docs/STORAGE_SCHEMA.md](docs/STORAGE_SCHEMA.md).
+
+### Summary of Storage Architecture
+* **Active Client Storage**: Persisted in browser `localStorage` under key `'cart'` as an array of validated `CartItem` objects with 99-quantity ceilings and epsilon decimal rounding.
+* **Resilience**: Handled by `SafeStorage` with automatic in-memory `Map` fallback on quota limits or privacy restrictions.
+* **Proposed Relational Database (v2.0)**: Documented with a Mermaid ER diagram and PostgreSQL/MySQL SQL DDL migration scripts covering `categories`, `products`, `users`, `orders`, and `order_items`.
+
+---
+
+## 🔒 13. Security Considerations & Accessibility
+
+### Security Hardening
+1. **HTML Entity Escaping**: `escapeHtml()` sanitizes all untrusted strings before insertion into DOM HTML strings, neutralizing stored and reflected XSS.
+2. **DOM Injection Immunity**: `ToastManager` injects notifications exclusively via `textContent`, completely preventing script execution.
+3. **URL Protocol Verification**: `sanitizeImageUrl()` blocks dangerous script protocols (`javascript:`, `vbscript:`, `data:text/html`), preventing URI-based exploits.
+4. **Strict Schema Validation**: Product titles, numeric prices, and positive quantities are strictly verified; negative prices and non-finite numbers are rejected with `CartValidationError`.
+
+### Accessibility (WCAG 2.1 AA)
+1. **Semantic HTML**: Proper heading hierarchy (`<h1>` through `<h4>`), `<main>`, `<nav>`, `<header>`, and `<footer>` elements.
+2. **WAI-ARIA Attributes**:
+   * Slide-out cart drawer marked with `role="dialog"`, `aria-modal="true"`, and `aria-label="Shopping Cart Drawer"`.
+   * Navbar cart count badge configured with `aria-live="polite"`.
+   * Floating toasts configured with `role="status"` or `role="alert"`.
+3. **Keyboard Navigation**:
+   * Cart icon is focusable (`tabindex="0"`, `role="button"`) and activates via `Enter` or `Space`.
+   * Cart drawer closes immediately on `Escape` key press.
+   * Focus is moved to the close button when the drawer opens and restored to the trigger element when it closes.
+   * Visible focus indicators (`:focus-visible`) across all interactive buttons, inputs, and links.
+
+---
+
+## 🔧 14. Troubleshooting Guide
+
+| Issue | Root Cause | Solution |
 | :--- | :--- | :--- |
-| **Cart items do not persist after restart** | Browser is in strict Private/Incognito mode with storage disabled, or storage cookies are blocked. | The app automatically uses an in-memory fallback. To preserve items permanently across sessions, enable cookies/storage or use normal browsing mode. |
+| **Cart items do not persist after restart** | Browser is in strict Private/Incognito mode or third-party cookies/storage are blocked. | The app automatically uses an in-memory fallback. To preserve items permanently across sessions, enable cookies/storage or use normal browsing mode. |
 | **`npm test` fails with `node: command not found`** | Node.js is not installed or not in your system `$PATH`. | Install Node.js v18+ via Homebrew (`brew install node`) or from [nodejs.org](https://nodejs.org). |
-| **Product images show placeholder graphics** | Remote third-party image URLs are blocked by an ad-blocker or offline network. | The application has gracefully fallen back to the built-in SVG placeholder. Check internet connectivity. |
-| **Search returns no items** | Search keywords do not match product titles or descriptions. | Click "View All Products" on the empty state banner to clear search filters. |
+| **Product images display placeholder graphics** | Remote third-party CDN URLs are blocked by network firewalls, ad-blockers, or offline mode. | The application has gracefully fallen back to the built-in SVG placeholder. Check network connectivity. |
+| **Search returns "No products found"** | Search keywords do not match product titles or descriptions. | Click "View All Products" on the empty state banner to reset search filters. |
 
 ---
 
-## 🔮 13. Known Limitations & Future Improvements
+## 🔮 15. Known Limitations & Future Roadmap
 
-1. **Client-Side Only Checkout**: The checkout flow currently simulates order placement. Connecting a real payment gateway (Stripe or Razorpay) and order database is planned for v2.0.
-2. **User Authentication**: The current version operates with a "Guest Collector" session. Full user accounts, password hashing, and saved delivery addresses will be added with the backend API release.
-3. **Product Pagination**: Currently, 16 products are rendered in a responsive grid. As the merchandise catalog grows beyond 50 items, infinite scrolling or server-side pagination will be introduced.
-4. **Localization & Currency Conversion**: Prices are presently formatted in Indian Rupees (₹ INR). Multi-currency support (USD, EUR, JPY) with real-time conversion rates is slated for v2.1.
+1. **Simulated Checkout**: Current checkout confirms orders client-side. Integrating a live payment gateway (Stripe or Razorpay) and order database is planned for v2.0.
+2. **User Authentication**: Operates in "Guest Collector" mode. Multi-tenant customer accounts and JWT authentication will arrive with the backend release.
+3. **Catalog Pagination**: Currently displays 16 curated anime items in a responsive grid. Server-side pagination or infinite scroll will be added when expanding beyond 50 products.
+4. **Multi-Currency Support**: Prices are currently denominated in Indian Rupees (₹ INR). Real-time exchange rate conversion (USD, EUR, JPY) is planned for v2.1.
 
 ---
 
 ## 📄 License & Attribution
 
-* **License**: MIT License. Open for educational and commercial merchandise use.
-* **Merchandise Rights**: Anime character artwork and trademarks belong to their respective creators and animation studios (Eiichiro Oda/Toei Animation, Masashi Kishimoto/Studio Pierrot, Akira Toriyama/Toei Animation, Gege Akutami/MAPPA, Koyoharu Gotouge/Ufotable).
+* **License**: MIT License. Open for educational and commercial merchandise development.
+* **Anime Character Trademarks**: Anime character names and artwork are property of their respective creators and animation studios (Eiichiro Oda / Toei Animation, Masashi Kishimoto / Studio Pierrot, Akira Toriyama / Toei Animation, Gege Akutami / MAPPA, Koyoharu Gotouge / Ufotable).

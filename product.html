@@ -5,11 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🐳 Anime Products - ANiii STORE</title>
     <meta name="description" content="Shop authentic, high-end anime figures, keychains, posters, apparel, and collectibles at ANiii STORE. High quality merchandise with express global shipping.">
+    <!-- Centralized Stylesheet: Design tokens, glassmorphic navbar, animated gradient, responsive layouts -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- NAVBAR -->
+    <!--
+      NAVBAR: Sticky Glassmorphic Header
+      - Provides navigation between Home, Products, and Categories.
+      - Includes real-time search input wired to live catalog filtering via SearchAndFilterController.
+      - Cart icon displays synchronized item count (#cart-count) and triggers the slide-out drawer.
+    -->
     <nav class="navbar" role="navigation" aria-label="Main Navigation">
         <div class="navbar-container">
             <a href="web2.html" class="logo" style="text-decoration: none;">
@@ -21,13 +27,16 @@
                 <li><a href="web2.html#categories">Categories</a></li>
             </ul>
             <div class="nav-right">
+                <!-- Search Box: Live instant catalog filter by title/description -->
                 <div class="search-box">
                     <input type="text" placeholder="Search anime products..." aria-label="Search anime products">
                     <button aria-label="Search">🔍</button>
                 </div>
+                <!-- Cart Trigger: Keyboard accessible via Enter / Space -->
                 <div class="cart-icon" role="button" tabindex="0" aria-label="View Shopping Cart">
                     🛒 <span id="cart-count" aria-live="polite">0</span>
                 </div>
+                <!-- Guest Collector Login / Account Status -->
                 <button class="login-btn" aria-label="User Account">Login</button>
             </div>
         </div>
@@ -36,7 +45,15 @@
     <!-- MAIN PRODUCT CATALOG TITLE -->
     <h1 class="section-title">Premium Anime Collection</h1>
 
-    <!-- PRODUCTS GRID -->
+    <!--
+      PRODUCTS GRID: Responsive Merchandise Catalog
+      - Each .product card contains:
+        * data-category: Used by SearchAndFilterController for URL and live filtering.
+        * img: Styled with loading="lazy" and wrapped in automated error fallbacks.
+        * h2 & h4: Searched against user query keywords.
+        * button onclick="addToCart(...)": Invokes the backward-compatible global API wrapper,
+          which validates inputs, handles max quantity capping, triggers cart bounce, and shows a toast.
+    -->
     <main>
         <section class="products" aria-label="Anime Product Catalog">
             <div class="product reveal" data-category="figures">
@@ -201,7 +218,7 @@
         </section>
     </main>
 
-    <!-- FEATURES -->
+    <!-- VALUE PROPOSITIONS: Store Benefits with Scroll Reveal -->
     <section class="features">
         <div class="feature-box reveal">
             <div class="icon">🔒</div>
@@ -230,7 +247,7 @@
         </div>
     </section>
 
-    <!-- FOOTER -->
+    <!-- FOOTER: Navigation Links, Customer Support, Legal Disclaimers -->
     <footer class="footer">
         <div class="footer-container reveal">
             <div class="footer-section">
@@ -264,7 +281,10 @@
         </div>
     </footer>
 
-    <!-- SCRIPTS -->
+    <!--
+      CORE JAVASCRIPT: State Controller, Presenter & Error Boundary
+      - Automatically bootstraps CartService, SafeStorage, CartUI, SearchController, and ImageFallbacks.
+    -->
     <script src="cart.js"></script>
 </body>
 </html>
